@@ -127,6 +127,8 @@ async function getFoxgirlRedirect (req, res, rating = 'g') {
   res.redirect(data.url)
 }
 
+// legacy
+/*
 async function getFoxgirlHtml (req, res, rating = 'g', title = 'Foxgirl Roulette') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
@@ -148,6 +150,7 @@ async function getFoxgirlHtml (req, res, rating = 'g', title = 'Foxgirl Roulette
   res.header('mimi-tags', data.data.tag_string)
   res.send(rawHtml)
 }
+*/
 
 async function getFoxgirlImage (req, res, rating = 'g') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
@@ -169,33 +172,19 @@ async function getFoxgirlImage (req, res, rating = 'g') {
   res.header('mimi-image', data.url)
   res.header('mimi-post', `https://danbooru.donmai.us/posts/${data.data.id}`)
   res.header('mimi-tags', data.data.tag_string)
-  res.header('Content-Type', 'image') // required for the image to display properly
+  res.header('content-type', 'image') // required for the image to display properly in browsers
   res.write(data.image)
   res.end()
 }
 
-app.get(/\/foxgirl__(|\/.*)/, async (req, res) => {
-  await getFoxgirlRedirect(req, res, 's')
-})
-
-app.get(/\/foxgirl_lewd_(|\/.*)/, async (req, res) => {
-  await getFoxgirlHtml(req, res, 's', 'Foxgirl Roulette [LEWD]')
-})
-
 app.get(/\/foxgirl_lewd(|\/.*)/, async (req, res) => {
+  if (req.headers['user-agent'].includes('discord')) return await getFoxgirlRedirect(req, res, 's')
   await getFoxgirlImage(req, res, 's')
 })
 
-// legacy
-app.get(/\/foxgirl__(|\/.*)/, async (req, res) => {
-  await getFoxgirlRedirect(req, res, 'g')
-})
-
-app.get(/\/foxgirl_(|\/.*)/, async (req, res) => {
-  await getFoxgirlHtml(req, res, 'g', 'Foxgirl Roulette')
-})
-
 app.get(/^\/foxgirl(|\/.*)$/, async (req, res) => {
+  // discord kinda wants the url returned to end in an image like .png or .jpg but I can't be bothered to do that properly
+  if (req.headers['user-agent'].includes('discord')) return await getFoxgirlRedirect(req, res, 'g')
   await getFoxgirlImage(req, res, 'g')
 })
 
