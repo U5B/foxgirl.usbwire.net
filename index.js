@@ -36,7 +36,7 @@ app.use(async (req, res, next) => {
   log.info(`${req.method}:${req.url} ${res.statusCode}`)
   switch (req.url) {
     case '/': { // redirect to reloadable page
-      req.url = '/foxgirl_'
+      req.url = '/foxgirl'
       break
     }
   }
