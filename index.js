@@ -208,7 +208,7 @@ async function requestTag (type = 'fox', rating = 'g', image = true) {
   if (excluded === true) {
     return await requestTag(type, rating, image)
   }
-  if (image === false) return [response.url, null]
+  if (image === false) return [response, null]
   const downloadedImage = await downloadImage(response.url, false)
   if (downloadedImage == null) return [response, null]
   return [response, downloadedImage]
