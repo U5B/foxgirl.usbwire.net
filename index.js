@@ -9,6 +9,29 @@ const port = 42069
 app.set('trust proxy', true)
 app.use(express.static('public'))
 
+const tags = {
+  fox: ['fox_girl', 'fox_tail', 'fox_ears'],
+  mimi: ['animal_ear_fluff'],
+  wolf: ['wolf_girl', 'wolf_tail', 'wolf_ears'],
+  cat: ['cat_girl', 'cat_tail', 'cat_ears'],
+  excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization']
+}
+
+const config = {
+  requestsPer: 5,
+  requestsMax: 20,
+  ms: 1000,
+  ratelimitMs: 15000
+}
+
+const cached = {
+  ips: {},
+  requests: 0,
+  requestsTimeout: null,
+  ratelimit: false,
+  ratelimitTimeout: null
+}
+
 app.use(async (req, res, next) => {
   log.info(`${req.method}:${req.url} ${res.statusCode}`)
   switch (req.url) {
@@ -17,30 +40,15 @@ app.use(async (req, res, next) => {
       break
     }
   }
+  // global ratelimit stuffz so that sky doesn't overload my server
   cached.requests++
   clearTimeout(cached.requestsTimeout)
   cached.requestsTimeout = setTimeout(() => {
     cached.requests = 0
-  }, cached.ms)
+  }, config.ms)
   next()
 })
 
-const tags = {
-  fox: ['fox_girl', 'fox_tail', 'fox_ears'],
-  mimi: ['animal_ear_fluff'],
-  wolf: ['wolf_girl', 'wolf_tail', 'wolf_ears'],
-  cat: ['cat_girl', 'cat_tail', 'cat_ears'],
-  excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears']
-}
-
-const cached = {
-  ips: {},
-  requests: 0,
-  requestsTimeout: null,
-  ratelimit: false,
-  ratelimitTimeout: null,
-  ms: 1000
-}
 async function preCache (ip) {
   if (cached.ips[ip] == null) {
     cached.ips[ip] = {
@@ -63,7 +71,7 @@ async function postCache (ip) {
     cached.ips[ip].redirect = null
     cached.ips[ip].image = null
     cached.ips[ip].requests = 0
-  }, cached.ms)
+  }, config.ms)
 }
 
 async function cacheRedirect (url, ip) {
@@ -106,7 +114,7 @@ async function getFoxgirlRedirect (req, res, rating = 'g') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
   const redirectCached = await redirectIsCached(originalIp)
-  if (redirectCached && (requestCount >= 5 || cached.requests >= 20 || cached.ratelimit === true)) {
+  if (redirectCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
     await cacheRedirect(redirectCached, originalIp)
     log.info(`Served image cached: '${redirectCached}'`)
     return res.redirect(redirectCached)
@@ -123,7 +131,7 @@ async function getFoxgirlHtml (req, res, rating = 'g', title = 'Foxgirl Roulette
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
   const htmlCached = await htmlIsCached(originalIp)
-  if (htmlCached && (requestCount >= 5 || cached.requests >= 20 || cached.ratelimit === true)) {
+  if (htmlCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
     await cacheHtml(htmlCached, originalIp)
     log.info(`Served image cached: '${htmlCached}'`)
     return res.send(htmlCached)
@@ -145,7 +153,7 @@ async function getFoxgirlImage (req, res, rating = 'g') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
   const imageCached = await imageIsCached(originalIp)
-  if (imageCached && (requestCount >= 5 || cached.requests >= 20 || cached.ratelimit === true)) {
+  if (imageCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
     await cacheImage(imageCached, originalIp)
     // can't be bothered to cache the headers too
     res.header('Content-Type', 'image')
@@ -224,7 +232,7 @@ async function cachedTag (ip, type = 'fox', rating = 'g') {
     if (cached[rating][type].length === 0) await addCachedTag(type, rating)
     addCachedTag(type, rating)
   }
-  addCachedTag(type, rating)
+  addCachedTag(type, rating) // always add a new tag to t he cache
   const image = { data: cached[rating][type][0].data, url: cached[rating][type][0].url, image: cached[rating][type][0].image }
   if (cached[rating][type].length > 0) cached[rating][type].splice(0, 1)
   else return cached.ips[ip].previousImage
@@ -239,6 +247,7 @@ async function addCachedTag (type = 'fox', rating = 'g') {
   cached[rating][type].push({ data: response.data, url: response.url, image: image })
 }
 
+// technically legacy, I now just send the raw image
 async function generateHtml (url, title = 'Roulette') {
   const rawHtml = `
   <html style="height: 100%;">
@@ -267,6 +276,7 @@ async function downloadImage (url, base64 = true) {
     return base64data
   } catch (error) {
     const response = error.response
+    if (response == null || response?.status == null) return null
     switch (response.status) {
       case 429: {
         cached.ratelimit = true
@@ -274,7 +284,7 @@ async function downloadImage (url, base64 = true) {
         clearTimeout(cached.ratelimitTimeout)
         cached.ratelimitTimeout = setTimeout(() => {
           cached.ratelimit = false
-        }, 15000)
+        }, config.ratelimitMs)
         return null
       }
       default: {
@@ -297,6 +307,7 @@ async function requestCheckRaw (type = 'fox') {
 }
 */
 
+// goes through each tag in tag_string and checks if it should be excluded (no furry stuff)
 async function excludeTags (inputTags) {
   const inputTag = inputTags.split(' ')
   for (const tag of inputTag) {
@@ -340,7 +351,7 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
         clearTimeout(cached.ratelimitTimeout)
         cached.ratelimitTimeout = setTimeout(() => {
           cached.ratelimit = false
-        }, 15000)
+        }, config.ratelimitMs)
         return responseJson
       }
       default: {
