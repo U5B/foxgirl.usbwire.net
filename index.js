@@ -159,6 +159,7 @@ async function writeImageData (res, data) {
   res.header('mimi-tags', data.tags)
   res.header('content-type', data.content) // required for the image to display properly in browsers
   res.write(data.image)
+  log.info(`Served image: ${data.url} as https://danbooru.donmai.us/posts/${data.data.id}`)
   return true
 }
 
@@ -169,7 +170,7 @@ async function getImage (req, res, rating = 'g', tag = 'fox') {
   if (imageCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
     await cacheImage(imageCached, originalIp)
     // await writeImageData(res, imageCached)
-    res.status(304)
+    res.status(304) // force browser to use cache
     return res.end()
   }
   const data = await cachedTag(originalIp, tag, rating)
@@ -226,7 +227,7 @@ async function cachedTag (ip, type = 'fox', rating = 'g') {
   addCachedTag(type, rating) // always add a new tag to the cache
   const image = cached[rating][type][0]
   if (cached[rating][type].length > 0 && cached.ratelimit === false) cached[rating][type].splice(0, 1)
-  else return cached.ips[ip].previousImage
+  else if (cached.ratelimit === true && cached.ips[ip].previousImage) return cached.ips[ip].previousImage
   return image
 }
 
