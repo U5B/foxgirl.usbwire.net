@@ -19,7 +19,7 @@ const tags = {
 
 const config = {
   requestsPer: 5,
-  requestsMax: 20,
+  requestsMax: 15,
   ms: 1000,
   ratelimitMs: 15000
 }
@@ -100,8 +100,8 @@ async function htmlIsCached (ip) {
 
 async function cacheImage (image, ip) {
   await preCache(ip)
-  cached.image = image
-  cached.previousImage = image
+  cached.ips[ip].image = image
+  cached.ips[ip].previousImage = image
   await postCache(ip)
 }
 
@@ -110,16 +110,16 @@ async function imageIsCached (ip) {
   return false
 }
 
-async function getFoxgirlRedirect (req, res, rating = 'g') {
+async function getRedirect (req, res, rating = 'g', tag = 'fox') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
   const redirectCached = await redirectIsCached(originalIp)
-  if (redirectCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
+  if (cached.ratelimit === true || (redirectCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax))) {
     await cacheRedirect(redirectCached, originalIp)
     log.info(`Served image cached: '${redirectCached}'`)
     return res.redirect(redirectCached)
   }
-  const data = await cachedTag(originalIp, 'fox', rating)
+  const data = await cachedTag(originalIp, tag, rating)
   if (data.url == null && redirectCached) return res.redirect(redirectCached)
   else if (data.url == null) return res.redirect('https://usbwire.net')
   await cacheRedirect(data.url, originalIp)
@@ -129,7 +129,7 @@ async function getFoxgirlRedirect (req, res, rating = 'g') {
 
 // legacy
 /*
-async function getFoxgirlHtml (req, res, rating = 'g', title = 'Foxgirl Roulette') {
+async function getHtml (req, res, rating = 'g', tag = 'fox') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
   const htmlCached = await htmlIsCached(originalIp)
@@ -138,10 +138,10 @@ async function getFoxgirlHtml (req, res, rating = 'g', title = 'Foxgirl Roulette
     log.info(`Served image cached: '${htmlCached}'`)
     return res.send(htmlCached)
   }
-  const data = await cachedTag(originalIp, 'fox', rating)
+  const data = await cachedTag(originalIp, tag, rating)
   if (data.url == null && htmlCached) return res.send(htmlCached)
   else if (data.url == null) return res.redirect('https://usbwire.net')
-  const rawHtml = await generateHtml(data.url, title)
+  const rawHtml = await generateHtml(data.url, 'uwu')
   await cacheHtml(rawHtml, originalIp)
   cached.ips[originalIp].requests++
   // extra data in headers
@@ -152,40 +152,42 @@ async function getFoxgirlHtml (req, res, rating = 'g', title = 'Foxgirl Roulette
 }
 */
 
-async function getFoxgirlImage (req, res, rating = 'g') {
+// writes necessary image data
+async function writeImageData (res, data) {
+  res.header('mimi-image', data.url)
+  res.header('mimi-post', `https://danbooru.donmai.us/posts/${data.data.id}`)
+  res.header('mimi-tags', data.tags)
+  res.header('content-type', data.content) // required for the image to display properly in browsers
+  res.write(data.image)
+  return true
+}
+
+async function getImage (req, res, rating = 'g', tag = 'fox') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
   const imageCached = await imageIsCached(originalIp)
   if (imageCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
     await cacheImage(imageCached, originalIp)
-    // can't be bothered to cache the headers too
-    res.header('Content-Type', 'image')
-    res.write(imageCached)
+    // await writeImageData(res, imageCached)
+    res.status(304)
     return res.end()
   }
-  const data = await cachedTag(originalIp, 'fox', rating)
+  const data = await cachedTag(originalIp, tag, rating)
   if (data.image == null && imageCached) await res.write(imageCached)
   else if (data.image == null) return res.redirect('https://usbwire.net')
-  await cacheImage(data.image, originalIp)
+  await cacheImage(data, originalIp)
   cached.ips[originalIp].requests++
-  // extra data in the headers
-  res.header('mimi-image', data.url)
-  res.header('mimi-post', `https://danbooru.donmai.us/posts/${data.data.id}`)
-  res.header('mimi-tags', data.data.tag_string)
-  res.header('content-type', 'image') // required for the image to display properly in browsers
-  res.write(data.image)
+  await writeImageData(res, data)
+  res.status(200)
   res.end()
 }
 
 app.get(/\/foxgirl_lewd(|\/.*)/, async (req, res) => {
-  if (req.headers['user-agent'].includes('discord')) return await getFoxgirlRedirect(req, res, 's')
-  await getFoxgirlImage(req, res, 's')
+  await getImage(req, res, 's', 'fox')
 })
 
 app.get(/^\/foxgirl(|\/.*)$/, async (req, res) => {
-  // discord kinda wants the url returned to end in an image like .png or .jpg but I can't be bothered to do that properly
-  if (req.headers['user-agent'].includes('discord')) return await getFoxgirlRedirect(req, res, 'g')
-  await getFoxgirlImage(req, res, 'g')
+  await getImage(req, res, 'g', 'fox')
 })
 
 app.listen(port, async () => {
@@ -198,7 +200,7 @@ async function requestTag (type = 'fox', rating = 'g', image = true) {
   const [tag, num] = await arrayRandomizer(tags[type])
   const response = await requestDanbooru(tag, rating)
   // if image response isn't expected, just return senko
-  if (response == null || response.url == null || response.data?.success === false || response.tags == null) return [null, null]
+  if (response == null || response.url == null || response.data?.success === false || response.tags == null) return null
   // otherwise if it is flagged, request a new one
   if ((response.data?.is_flagged || response.data?.is_deleted || response.data?.is_pending || response.data?.is_banned) === true) {
     log.error('Image is flagged, deleted, pending, or banned... > Requesting new image...')
@@ -208,10 +210,10 @@ async function requestTag (type = 'fox', rating = 'g', image = true) {
   if (excluded === true) {
     return await requestTag(type, rating, image)
   }
-  if (image === false) return [response, null]
+  if (image === false) return { responseData: response, imageData: null }
   const downloadedImage = await downloadImage(response.url, false)
-  if (downloadedImage == null) return [response, null]
-  return [response, downloadedImage]
+  if (downloadedImage == null) return { responseData: response, imageData: null }
+  return { responseData: response, imageData: downloadedImage }
 }
 
 async function cachedTag (ip, type = 'fox', rating = 'g') {
@@ -221,19 +223,22 @@ async function cachedTag (ip, type = 'fox', rating = 'g') {
     if (cached[rating][type].length === 0) await addCachedTag(type, rating)
     addCachedTag(type, rating)
   }
-  addCachedTag(type, rating) // always add a new tag to t he cache
-  const image = { data: cached[rating][type][0].data, url: cached[rating][type][0].url, image: cached[rating][type][0].image }
-  if (cached[rating][type].length > 0) cached[rating][type].splice(0, 1)
+  addCachedTag(type, rating) // always add a new tag to the cache
+  const image = cached[rating][type][0]
+  if (cached[rating][type].length > 0 && cached.ratelimit === false) cached[rating][type].splice(0, 1)
   else return cached.ips[ip].previousImage
   return image
 }
 
 async function addCachedTag (type = 'fox', rating = 'g') {
-  const [response, image] = await requestTag(type, rating, true)
-  if (response == null) return null
+  if (cached.ratelimit === true) return null
+  const request = await requestTag(type, rating, true)
+  if (request == null) return null
   if (cached[rating] == null) cached[rating] = {}
   if (cached[rating][type] == null) cached[rating][type] = []
-  cached[rating][type].push({ data: response.data, url: response.url, image: image })
+  const response = request.responseData
+  const image = request.imageData
+  cached[rating][type].push({ data: response.data, url: response.url, image: image.image, tags: response.tags, content: image.content })
 }
 
 // technically legacy, I now just send the raw image
@@ -258,11 +263,12 @@ async function downloadImage (url, base64 = true) {
     const response = await axios.get(url, { responseType: 'arraybuffer' })
     if (response.status !== 200) return null
     log.debug('Done!')
-    if (base64 === false) return Buffer.from(response.data, 'binary')
-    const raw = Buffer.from(response.data, 'binary').toString('base64')
+    const raw = Buffer.from(response.data, 'binary')
     const contentType = response.headers['content-type']
-    const base64data = `data:${contentType};base64,${raw}`
-    return base64data
+    if (base64 === false) return { image: raw, content: contentType }
+    const rawBase64 = raw.toString('base64')
+    const base64data = `data:${contentType};base64,${rawBase64}`
+    return { image: base64data, content: contentType }
   } catch (error) {
     const response = error.response
     if (response == null || response?.status == null) return null
