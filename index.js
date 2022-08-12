@@ -11,9 +11,12 @@ app.use(express.static('public'))
 
 const tags = {
   fox: ['fox_girl', 'fox_tail', 'fox_ears'],
-  mimi: ['animal_ear_fluff'],
   wolf: ['wolf_girl', 'wolf_tail', 'wolf_ears'],
   cat: ['cat_girl', 'cat_tail', 'cat_ears'],
+  foxgirl: ['fox_girl'],
+  wolfgirl: ['wolf_girl'],
+  catgirl: ['cat_girl'],
+  mimi: ['animal_ear_fluff'],
   excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization']
 }
 
@@ -184,17 +187,31 @@ async function getImage (req, res, rating = 'g', tag = 'fox') {
 }
 
 app.get(/\/foxgirl_lewd(|\/.*)/, async (req, res) => {
-  await getImage(req, res, 's', 'fox')
+  await getImage(req, res, 's', 'foxgirl')
 })
 
 app.get(/^\/foxgirl(|\/.*)$/, async (req, res) => {
-  await getImage(req, res, 'g', 'fox')
+  await getImage(req, res, 'g', 'foxgirl')
+})
+
+app.get(/^\/wolfgirl_lewd(|\/.*)/, async (req, res) => {
+  await getImage(req, res, 's', 'wolfgirl')
+})
+
+app.get(/^\/wolfgirl(|\/.*)/, async (req, res) => {
+  await getImage(req, res, 'g', 'wolfgirl')
+})
+
+app.get(/^\/catgirl_lewd(|\/.*)/, async (req, res) => {
+  await getImage(req, res, 's', 'catgirl')
+})
+
+app.get(/^\/catgirl(|\/.*)/, async (req, res) => {
+  await getImage(req, res, 'g', 'catgirl')
 })
 
 app.listen(port, async () => {
   log.info(`API listening on port ${port}!`)
-  await addCachedTag('fox', 'g')
-  await addCachedTag('fox', 's')
 })
 
 async function requestTag (type = 'fox', rating = 'g', image = true) {
