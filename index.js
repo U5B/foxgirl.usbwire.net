@@ -13,11 +13,11 @@ const tags = {
   fox: ['fox_girl', 'fox_tail', 'fox_ears'],
   wolf: ['wolf_girl', 'wolf_tail', 'wolf_ears'],
   cat: ['cat_girl', 'cat_tail', 'cat_ears'],
-  foxgirl: ['fox_girl'],
-  wolfgirl: ['wolf_girl'],
-  catgirl: ['cat_girl'],
+  foxgirl: ['solo fox_girl'],
+  wolfgirl: ['solo wolf_girl'],
+  catgirl: ['solo cat_girl'],
   mimi: ['animal_ear_fluff'],
-  excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization']
+  excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization', 'animal_costume']
 }
 
 const config = {
@@ -35,32 +35,28 @@ const cached = {
   ratelimitTimeout: null
 }
 
+// logging >w<
 app.use(async (req, res, next) => {
   log.info(`${req.method}:${req.url} ${res.statusCode}`)
-  switch (req.url) {
-    case '/': { // redirect to reloadable page
-      req.url = '/foxgirl'
-      break
-    }
-  }
+  next()
+})
+
+async function ratelimitRequests (ip) {
   // global ratelimit stuffz so that sky doesn't overload my server
   cached.requests++
   clearTimeout(cached.requestsTimeout)
   cached.requestsTimeout = setTimeout(() => {
     cached.requests = 0
   }, config.ms)
-  next()
-})
+  cached.ips[ip].requests++
+}
 
 async function preCache (ip) {
   if (cached.ips[ip] == null) {
     cached.ips[ip] = {
-      html: null,
-      previousHtml: null,
-      redirect: null,
-      previousRedirect: null,
-      image: null,
-      previousImage: null,
+      data: null,
+      previousData: null,
+      url: null,
       timeout: null,
       requests: 0
     }
@@ -70,63 +66,39 @@ async function preCache (ip) {
 
 async function postCache (ip) {
   cached.ips[ip].timeout = setTimeout(() => {
-    cached.ips[ip].html = null
-    cached.ips[ip].redirect = null
-    cached.ips[ip].image = null
+    cached.ips[ip].data = null
     cached.ips[ip].requests = 0
   }, config.ms)
 }
 
-async function cacheRedirect (url, ip) {
+async function cacheData (data, req) {
+  const ip = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   await preCache(ip)
-  cached.ips[ip].redirect = url
-  cached.ips[ip].previousRedirect = url
+  cached.ips[ip].data = data
+  cached.ips[ip].previousData = data
+  cached.ips[ip].url = req.url
   await postCache(ip)
 }
 
-async function redirectIsCached (ip) {
-  if (cached.ips[ip]?.redirect) return cached.ips[ip].redirect
-  return false
-}
-
-async function cacheHtml (html, ip) {
-  await preCache(ip)
-  cached.ips[ip].html = html
-  cached.ips[ip].previousHtml = html
-  await postCache(ip)
-}
-
-async function htmlIsCached (ip) {
-  if (cached.ips[ip]?.html) return cached.ips[ip].html
-  return false
-}
-
-async function cacheImage (image, ip) {
-  await preCache(ip)
-  cached.ips[ip].image = image
-  cached.ips[ip].previousImage = image
-  await postCache(ip)
-}
-
-async function imageIsCached (ip) {
-  if (cached.ips[ip]?.image) return cached.ips[ip].image
+async function dataIsCached (ip) {
+  if (cached.ips[ip]?.data) return cached.ips[ip].data
   return false
 }
 
 async function getRedirect (req, res, rating = 'g', tag = 'fox') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
-  const redirectCached = await redirectIsCached(originalIp)
+  const redirectCached = await dataIsCached(originalIp)
   if (cached.ratelimit === true || (redirectCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax))) {
-    await cacheRedirect(redirectCached, originalIp)
-    log.info(`Served image cached: '${redirectCached}'`)
-    return res.redirect(redirectCached)
+    await cacheData(redirectCached, req)
+    log.info(`Served image cached: '${redirectCached.url}'`)
+    return res.redirect(redirectCached.url)
   }
   const data = await cachedTag(originalIp, tag, rating)
-  if (data.url == null && redirectCached) return res.redirect(redirectCached)
-  else if (data.url == null) return res.redirect('https://usbwire.net')
-  await cacheRedirect(data.url, originalIp)
-  cached.ips[originalIp].requests++
+  if (data?.url == null && redirectCached) return res.redirect(redirectCached.url)
+  else if (data?.url == null) return res.redirect('https://usbwire.net')
+  await cacheData(data, req)
+  await ratelimitRequests(originalIp)
   res.redirect(data.url)
 }
 
@@ -169,45 +141,73 @@ async function writeImageData (res, data) {
 async function getImage (req, res, rating = 'g', tag = 'fox') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
-  const imageCached = await imageIsCached(originalIp)
+  const imageCached = await dataIsCached(originalIp)
   if (imageCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
-    await cacheImage(imageCached, originalIp)
-    // await writeImageData(res, imageCached)
-    res.status(304) // force browser to use cache
+    const cached304 = cached.ips[originalIp]?.url === req.url
+    await cacheData(imageCached, req)
+    if (cached304) res.status(304)
+    else await writeImageData(res, imageCached)
     return res.end()
   }
   const data = await cachedTag(originalIp, tag, rating)
-  if (data.image == null && imageCached) await res.write(imageCached)
-  else if (data.image == null) return res.redirect('https://usbwire.net')
-  await cacheImage(data, originalIp)
-  cached.ips[originalIp].requests++
+  if (data?.image == null && imageCached) await writeImageData(res, imageCached)
+  else if (data?.image == null && data?.url) return res.redirect(data.url)
+  else if (data?.image == null) return res.redirect('https://usbwire.net')
+  await cacheData(data, req)
+  await ratelimitRequests(originalIp)
   await writeImageData(res, data)
   res.status(200)
   res.end()
 }
 
-app.get(/\/foxgirl_lewd(|\/.*)/, async (req, res) => {
-  await getImage(req, res, 's', 'foxgirl')
+async function determineEndpoint (req, res, endpoint = 'foxgirl') {
+  const restUri = req.params['0']
+  switch (restUri) {
+    case 'nsfw': {
+      await getImage(req, res, 'q', endpoint)
+      break
+    }
+    case 'lewd': {
+      await getImage(req, res, 's', endpoint)
+      break
+    }
+    case 'r': {
+      await getRedirect(req, res, 'g', endpoint)
+      break
+    }
+    case '':
+    default: {
+      await getImage(req, res, 'g', endpoint)
+      break
+    }
+  }
+  return true
+}
+
+app.get(/^\/foxgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
+  await determineEndpoint(req, res, 'foxgirl')
 })
 
-app.get(/^\/foxgirl(|\/.*)$/, async (req, res) => {
-  await getImage(req, res, 'g', 'foxgirl')
+app.get(/^\/wolfgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
+  await determineEndpoint(req, res, 'wolfgirl')
 })
 
-app.get(/^\/wolfgirl_lewd(|\/.*)/, async (req, res) => {
-  await getImage(req, res, 's', 'wolfgirl')
+app.get(/^\/catgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
+  await determineEndpoint(req, res, 'catgirl')
 })
 
-app.get(/^\/wolfgirl(|\/.*)/, async (req, res) => {
-  await getImage(req, res, 'g', 'wolfgirl')
+app.get(/^\/custom(?:\/.*)?$/, async (req, res) => {
+  let tag = req.query?.tag ?? 'foxgirl'
+  let rating = req.query?.rating ?? 'g'
+  const redirect = req.query?.redirect ?? false
+  if (tags[tag] == null) tag = 'foxgirl'
+  if (rating !== 'g' && rating !== 's' && rating !== 'q') rating = 'g'
+  if (redirect) await getRedirect(req, res, rating, tag)
+  else await getImage(req, res, rating, tag)
 })
 
-app.get(/^\/catgirl_lewd(|\/.*)/, async (req, res) => {
-  await getImage(req, res, 's', 'catgirl')
-})
-
-app.get(/^\/catgirl(|\/.*)/, async (req, res) => {
-  await getImage(req, res, 'g', 'catgirl')
+app.get('/', async (req, res) => {
+  res.send('Endpoints: [/foxgirl, /wolfgirl, /catgirl]')
 })
 
 app.listen(port, async () => {
@@ -215,18 +215,22 @@ app.listen(port, async () => {
 })
 
 async function requestTag (type = 'fox', rating = 'g', image = true) {
-  const [tag, num] = await arrayRandomizer(tags[type])
+  const tag = await arrayRandomizer(tags[type])
+  return await requestTagRaw(tag, rating, image)
+}
+
+async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = true) {
   const response = await requestDanbooru(tag, rating)
   // if image response isn't expected, just return senko
   if (response == null || response.url == null || response.data?.success === false || response.tags == null) return null
   // otherwise if it is flagged, request a new one
   if ((response.data?.is_flagged || response.data?.is_deleted || response.data?.is_pending || response.data?.is_banned) === true) {
     log.error('Image is flagged, deleted, pending, or banned... > Requesting new image...')
-    return await requestTag(type, rating, image)
+    return await requestTagRaw(tag, rating, image)
   }
   const excluded = await excludeTags(response.tags)
   if (excluded === true) {
-    return await requestTag(type, rating, image)
+    return await requestTagRaw(tag, rating, image)
   }
   if (image === false) return { responseData: response, imageData: null }
   const downloadedImage = await downloadImage(response.url, false)
@@ -339,16 +343,20 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
   if (cached.ratelimit === true) return responseJson
   // rating can be 'g,s' but that adds suggestive content which can get me booped by Discord
   // example of extreme "suggestive": https://cdn.donmai.us/original/fb/ec/__kitsune_onee_san_original_drawn_by_akitsuki_karasu__fbecb3a960885c4227d474c0d36b66d6.png
-  // https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>10 rating:g (solo fox_girl)
-  const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>10 rating:${rating} (solo ${tag})`
-  // `https://danbooru.donmai.us/posts/random?tags=filetype:png,jpg score:>5 favcount:>10 rating:${rating} (solo ${tag})`
+  // https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>10 rating:g (fox_girl)
+  const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>10 rating:${rating} (${tag})`
+  // `https://danbooru.donmai.us/posts/random?tags=filetype:png,jpg score:>5 favcount:>10 rating:${rating} (${tag})`
   try {
     log.debug(`Fetching [${tag}]...`)
     const response = await axios.get(url)
     if (response.status !== 200) return null // this shouldn't be reached if the request is successful
-    let responseUrl = response.data.large_file_url ?? response.data.file_url
+    const responseUrl = response.data.large_file_url ?? response.data.file_url
     log.debug(`Post: https://danbooru.donmai.us/posts/${response.data.id} || Rating: ${response.data.rating} || File: ${responseUrl}\nTags: ${response.data.tag_string}`)
-    if (raw === true) responseUrl = `https://danbooru.donmai.us/posts/${response.data.id}`
+    if (responseUrl == null) {
+      log.error('No image found in API response!')
+      log.error(response.data)
+      return responseJson
+    }
     responseJson.data = response.data
     responseJson.url = responseUrl
     responseJson.tags = response.data.tag_string
@@ -374,9 +382,9 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
   }
 }
 
-async function arrayRandomizer (tags) {
-  const random = Math.floor(Math.random() * tags.length)
-  return [tags[random], random]
+async function arrayRandomizer (array) {
+  const random = Math.floor(Math.random() * array.length)
+  return array[random]
 }
 
 // legacy stuff with APIs that sometimes got ratelimited too hard or were down
