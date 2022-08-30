@@ -6,8 +6,15 @@ const log = require('./log.js')
 const app = express()
 const port = 42069
 
-app.set('trust proxy', true)
-app.use(express.static('public'))
+// this is required so that the ip forwarded from Caddy is trusted
+// maybe set this to a localhost instead
+app.set('trust proxy', (ip) => {
+  console.log(ip)
+  if (ip === '127.0.0.1' || ip === '123.123.123.123') return true // trusted IPs
+  else return false
+})
+// use this if there is no Caddy proxy
+/// / app.use(express.static('public'))
 
 const tags = {
   fox: ['fox_girl', 'fox_tail', 'fox_ears'],
@@ -17,7 +24,7 @@ const tags = {
   wolfgirl: ['solo wolf_girl'],
   catgirl: ['solo cat_girl'],
   mimi: ['animal_ear_fluff'],
-  excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization', 'animal_costume']
+  excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization', 'animal_costume', 'cosplay_photo']
 }
 
 const config = {
@@ -41,17 +48,19 @@ app.use(async (req, res, next) => {
   next()
 })
 
-async function ratelimitRequests (ip) {
-  // global ratelimit stuffz so that sky doesn't overload my server
+// global ratelimit stuff so that sky doesn't overload my server
+async function addGlobalRatelimit () {
   cached.requests++
-  clearTimeout(cached.requestsTimeout)
+  clearTimeout(cached.requestsTimeout) // if there is a previous timeout loop, clear it
+  // set global cache requests to 0 after a set amount of time
   cached.requestsTimeout = setTimeout(() => {
     cached.requests = 0
   }, config.ms)
-  cached.ips[ip].requests++
 }
 
+// stuff to do before cacheData
 async function preCache (ip) {
+  // create
   if (cached.ips[ip] == null) {
     cached.ips[ip] = {
       data: null,
@@ -61,78 +70,68 @@ async function preCache (ip) {
       requests: 0
     }
   }
-  clearTimeout(cached.ips[ip].timeout)
+  clearTimeout(cached.ips[ip]?.timeout) // clear postCache's timeout
 }
 
 async function postCache (ip) {
+  // clear data after configured time
   cached.ips[ip].timeout = setTimeout(() => {
     cached.ips[ip].data = null
     cached.ips[ip].requests = 0
   }, config.ms)
 }
 
-async function cacheData (data, req) {
+async function cacheData (req, data) {
   const ip = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   await preCache(ip)
   cached.ips[ip].data = data
   cached.ips[ip].previousData = data
   cached.ips[ip].url = req.url
   await postCache(ip)
+  cached.ips[ip].requests++
 }
 
 async function dataIsCached (ip) {
-  if (cached.ips[ip]?.data) return cached.ips[ip].data
+  if (cached.ips[ip]?.data) return cached.ips[ip].data // if it exists on that ip, return the data
+  if (cached.ips[ip]?.previousData) return cached.ips[ip].previousData
   return false
 }
 
 async function getRedirect (req, res, rating = 'g', tag = 'fox') {
+  // get real ip
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
+  // get total request count
   const requestCount = cached.ips[originalIp]?.requests
-  const redirectCached = await dataIsCached(originalIp)
-  if (cached.ratelimit === true || (redirectCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax))) {
-    await cacheData(redirectCached, req)
-    log.info(`Served image cached: '${redirectCached.url}'`)
-    return res.redirect(redirectCached.url)
+  // get cached data
+  const dataCached = await dataIsCached(originalIp)
+  if
+  (
+    dataCached && // cached data
+    (
+      requestCount >= config.requestsPer || // too many requests for this ip
+      cached.requests >= config.requestsMax || // too many requests globally
+      cached.ratelimit === true // ratelimited by danbooru
+    )
+  ) {
+    await cacheData(req, dataCached)
+    log.info(`Served image cached: '${dataCached.url}'`)
+    return res.redirect(dataCached.url)
   }
   const data = await cachedTag(originalIp, tag, rating)
-  if (data?.url == null && redirectCached) return res.redirect(redirectCached.url)
+  if (data?.url == null && dataCached) return res.redirect(dataCached.url)
   else if (data?.url == null) return res.redirect('https://usbwire.net')
-  await cacheData(data, req)
-  await ratelimitRequests(originalIp)
+  if (data?.url && data?.image) await cacheData(req, data)
+  await addGlobalRatelimit()
   res.redirect(data.url)
 }
 
-// legacy
-/*
-async function getHtml (req, res, rating = 'g', tag = 'fox') {
-  const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
-  const requestCount = cached.ips[originalIp]?.requests
-  const htmlCached = await htmlIsCached(originalIp)
-  if (htmlCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
-    await cacheHtml(htmlCached, originalIp)
-    log.info(`Served image cached: '${htmlCached}'`)
-    return res.send(htmlCached)
-  }
-  const data = await cachedTag(originalIp, tag, rating)
-  if (data.url == null && htmlCached) return res.send(htmlCached)
-  else if (data.url == null) return res.redirect('https://usbwire.net')
-  const rawHtml = await generateHtml(data.url, 'uwu')
-  await cacheHtml(rawHtml, originalIp)
-  cached.ips[originalIp].requests++
-  // extra data in headers
-  res.header('mimi-image', data.url)
-  res.header('mimi-post', `https://danbooru.donmai.us/posts/${data.data.id}`)
-  res.header('mimi-tags', data.data.tag_string)
-  res.send(rawHtml)
-}
-*/
-
 // writes necessary image data
+// because otherwise image won't embed properly on discord
 async function writeImageData (res, data) {
   res.header('mimi-image', data.url)
   res.header('mimi-post', `https://danbooru.donmai.us/posts/${data.data.id}`)
   res.header('mimi-tags', data.tags)
-  res.header('content-type', data.content) // required for the image to display properly in browsers
+  res.header('content-type', data.mime) // required for the image to display properly in browsers
   res.write(data.image)
   log.info(`Served image: ${data.url} as https://danbooru.donmai.us/posts/${data.data.id}`)
   return true
@@ -141,21 +140,33 @@ async function writeImageData (res, data) {
 async function getImage (req, res, rating = 'g', tag = 'fox') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
-  const imageCached = await dataIsCached(originalIp)
-  if (imageCached && (requestCount >= config.requestsPer || cached.requests >= config.requestsMax || cached.ratelimit === true)) {
-    const cached304 = cached.ips[originalIp]?.url === req.url
-    await cacheData(imageCached, req)
+  const dataCached = await dataIsCached(originalIp)
+  if
+  (
+    dataCached && // cached data
+    (
+      requestCount >= config.requestsPer || // too many requests for this ip
+      cached.requests >= config.requestsMax || // too many requests globally
+      cached.ratelimit === true // ratelimited by danbooru
+    )
+  ) {
+    const cached304 = cached.ips[originalIp]?.url === req.url // can we just return a 304 instead of sending the same image
+    await cacheData(req, dataCached)
     if (cached304) res.status(304)
-    else await writeImageData(res, imageCached)
+    else await writeImageData(res, dataCached)
     return res.end()
   }
   const data = await cachedTag(originalIp, tag, rating)
-  if (data?.image == null && imageCached) await writeImageData(res, imageCached)
-  else if (data?.image == null && data?.url) return res.redirect(data.url)
+  if (data?.image == null && dataCached) {
+    await writeImageData(res, dataCached)
+    await cacheData(req, dataCached)
+  } else if (data?.image == null && data?.url) return res.redirect(data.url)
   else if (data?.image == null) return res.redirect('https://usbwire.net')
-  await cacheData(data, req)
-  await ratelimitRequests(originalIp)
-  await writeImageData(res, data)
+  else {
+    await writeImageData(res, data)
+    await cacheData(req, data)
+  }
+  await addGlobalRatelimit()
   res.status(200)
   res.end()
 }
@@ -239,6 +250,9 @@ async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = true) {
 }
 
 async function cachedTag (ip, type = 'fox', rating = 'g') {
+  // ratelimited? return previous Image
+  if (cached.ratelimit === true && cached.ips[ip].previousImage) return cached.ips[ip].previousImage
+  else if (cached.ratelimit === true) return null
   if (cached[rating] == null) cached[rating] = {}
   if (cached[rating][type] == null) cached[rating][type] = []
   if (cached[rating][type].length <= 5) {
@@ -246,10 +260,9 @@ async function cachedTag (ip, type = 'fox', rating = 'g') {
     addCachedTag(type, rating)
   }
   addCachedTag(type, rating) // always add a new tag to the cache
-  const image = cached[rating][type][0]
+  const data = cached[rating][type][0]
   if (cached[rating][type].length > 0 && cached.ratelimit === false) cached[rating][type].splice(0, 1)
-  else if (cached.ratelimit === true && cached.ips[ip].previousImage) return cached.ips[ip].previousImage
-  return image
+  return data
 }
 
 async function addCachedTag (type = 'fox', rating = 'g') {
@@ -260,22 +273,7 @@ async function addCachedTag (type = 'fox', rating = 'g') {
   if (cached[rating][type] == null) cached[rating][type] = []
   const response = request.responseData
   const image = request.imageData
-  cached[rating][type].push({ data: response.data, url: response.url, image: image.image, tags: response.tags, content: image.content })
-}
-
-// technically legacy, I now just send the raw image
-async function generateHtml (url, title = 'Roulette') {
-  const rawHtml = `
-  <html style="height: 100%;">
-  <head>
-    <meta name="viewport" content="width=device-width, minimum-scale=0.1">
-    <title>${title}</title>
-  </head>
-  <body style="margin: 0px; background: #0e0e0e; height: 100%">
-    <img style="max-width: 100%;max-height: 100%;height: auto; display: block;-webkit-user-select: none;margin: auto;cursor: zoom-in;background-color: hsl(0, 0%, 90%);transition: background-color 300ms;" src="${url}" alt="owo" fetchpriority="high">
-  </body>
-  </html>`
-  return rawHtml
+  cached[rating][type].push({ data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime })
 }
 
 async function downloadImage (url, base64 = true) {
@@ -286,18 +284,18 @@ async function downloadImage (url, base64 = true) {
     if (response.status !== 200) return null
     log.debug('Done!')
     const raw = Buffer.from(response.data, 'binary')
-    const contentType = response.headers['content-type']
-    if (base64 === false) return { image: raw, content: contentType }
+    const mime = response.headers['content-type'] // ex: image/png
+    if (base64 === false) return { image: raw, mime: mime }
     const rawBase64 = raw.toString('base64')
-    const base64data = `data:${contentType};base64,${rawBase64}`
-    return { image: base64data, content: contentType }
+    const base64data = `data:${mime};base64,${rawBase64}`
+    return { image: base64data, mime: mime }
   } catch (error) {
-    const response = error.response
+    const response = error?.response
     if (response == null || response?.status == null) return null
     switch (response.status) {
       case 429: {
         cached.ratelimit = true
-        log.error('Too many image requests! Redirecting user instead...')
+        log.error('Too many image requests!')
         clearTimeout(cached.ratelimitTimeout)
         cached.ratelimitTimeout = setTimeout(() => {
           cached.ratelimit = false
@@ -310,19 +308,6 @@ async function downloadImage (url, base64 = true) {
     }
   }
 }
-
-// this returns the raw request
-/*
-async function requestCheckRaw (type = 'fox') {
-  const [tag, num] = await arrayRandomizer(tags[type])
-  const response = await requestDanbooru(tag)
-  if (response == null || response.url == null || response.data?.success === false) return null
-  if ((response.data?.is_flagged || response.data?.is_deleted || response.data?.is_pending || response.data?.is_banned) === true) return requestCheck(type)
-  const excluded = await excludeTags(response.tags)
-  if (excluded === true) return requestCheckRaw(type)
-  return response
-}
-*/
 
 // goes through each tag in tag_string and checks if it should be excluded (no furry stuff)
 async function excludeTags (inputTags) {
@@ -340,11 +325,11 @@ async function excludeTags (inputTags) {
 
 async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
   const responseJson = { data: null, url: null, tags: null }
-  if (cached.ratelimit === true) return responseJson
+  if (cached.ratelimit === true) return null
   // rating can be 'g,s' but that adds suggestive content which can get me booped by Discord
   // example of extreme "suggestive": https://cdn.donmai.us/original/fb/ec/__kitsune_onee_san_original_drawn_by_akitsuki_karasu__fbecb3a960885c4227d474c0d36b66d6.png
   // https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>10 rating:g (fox_girl)
-  const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>10 rating:${rating} (${tag})`
+  const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg,gif score:>5 favcount:>10 rating:${rating} (${tag})`
   // `https://danbooru.donmai.us/posts/random?tags=filetype:png,jpg score:>5 favcount:>10 rating:${rating} (${tag})`
   try {
     log.debug(`Fetching [${tag}]...`)
@@ -352,7 +337,7 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
     if (response.status !== 200) return null // this shouldn't be reached if the request is successful
     const responseUrl = response.data.large_file_url ?? response.data.file_url
     log.debug(`Post: https://danbooru.donmai.us/posts/${response.data.id} || Rating: ${response.data.rating} || File: ${responseUrl}\nTags: ${response.data.tag_string}`)
-    if (responseUrl == null) {
+    if (responseUrl == null) { // sometimes, url isn't returned by API || needs further debugging
       log.error('No image found in API response!')
       log.error(response.data)
       return responseJson
@@ -362,21 +347,20 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
     responseJson.tags = response.data.tag_string
     return responseJson
   } catch (error) {
-    const response = error.response
-    const responseJson = { data: null, url: null, tags: null }
-    if (response == null || response?.status == null) return responseJson
+    const response = error?.response
+    if (response == null || response?.status == null) return null
     switch (response.status) {
       case 429: {
         cached.ratelimit = true
-        log.error('Too many API requests! Redirecting user instead...')
+        log.error('Too many API requests!')
         clearTimeout(cached.ratelimitTimeout)
         cached.ratelimitTimeout = setTimeout(() => {
           cached.ratelimit = false
         }, config.ratelimitMs)
-        return responseJson
+        return null
       }
       default: {
-        return responseJson
+        return null
       }
     }
   }
@@ -386,43 +370,3 @@ async function arrayRandomizer (array) {
   const random = Math.floor(Math.random() * array.length)
   return array[random]
 }
-
-// legacy stuff with APIs that sometimes got ratelimited too hard or were down
-/*
-async function requestFoxgirl () {
-  const urls = [
-    'https://nekos.life/api/v2/img/fox_girl',
-    'http://api.nekos.fun:8080/api/foxgirl',
-    'https://api.waifu.pics/sfw/awoo'
-  ]
-  const foxgirl = await requestRandom(urls)
-  return foxgirl
-}
-
-async function requestKemonomimi () {
-  const urls = [
-    // uses response.data.url
-    'https://api.waifu.pics/sfw/awoo',
-    'https://api.waifu.pics/sfw/neko',
-    'https://nekos.life/api/v2/img/fox_girl',
-    'https://nekos.life/api/v2/img/neko',
-    // uses response.data.image
-    'http://api.nekos.fun:8080/api/foxgirl'
-  ]
-  const kemonomimi = await requestRandom(urls)
-  return kemonomimi
-}
-
-async function requestRandom (urls) {
-  const random = Math.floor(Math.random() * urls.length)
-  try {
-    const response = await axios.get(urls[random])
-    if (response.status !== 200) return undefined
-    const responseUrl = response.data.image ?? response.data.url
-    log.info(`${urls[random]} => ${responseUrl}`)
-    return responseUrl
-  } catch (error) {
-    console.error(error)
-  }
-}
-*/
