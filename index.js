@@ -1,16 +1,19 @@
 const axios = require('axios')
 const express = require('express')
+const discord = require('discord.js')
+require('dotenv').config()
 
 const log = require('./log.js')
 
 const app = express()
-const port = 42069
+const port = process.env.PORT
+
+const webhookClient = new discord.WebhookClient({ url: process.env.WEBHOOK_URL })
 
 // this is required so that the ip forwarded from Caddy is trusted
-// maybe set this to a localhost instead
 app.set('trust proxy', (ip) => {
   console.log(ip)
-  if (ip === '127.0.0.1' || ip === '123.123.123.123') return true // trusted IPs
+  if (ip === '127.0.0.1') return true // only localhost
   else return false
 })
 // use this if there is no Caddy proxy
@@ -47,6 +50,48 @@ app.use(async (req, res, next) => {
   log.info(`${req.method}:${req.url} ${res.statusCode}`)
   next()
 })
+
+app.get(/^\/foxgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
+  await determineEndpoint(req, res, 'foxgirl')
+})
+
+app.get(/^\/wolfgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
+  await determineEndpoint(req, res, 'wolfgirl')
+})
+
+app.get(/^\/catgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
+  await determineEndpoint(req, res, 'catgirl')
+})
+
+app.get(/^\/custom(?:\/.*)?$/, async (req, res) => {
+  let tag = req.query?.tag ?? 'foxgirl'
+  let rating = req.query?.rating ?? 'g'
+  const redirect = req.query?.redirect ?? false
+  if (tags[tag] == null) tag = 'foxgirl'
+  if (rating !== 'g' && rating !== 's' && rating !== 'q') rating = 'g'
+  if (redirect) await getRedirect(req, res, rating, tag)
+  else await getImage(req, res, rating, tag)
+})
+
+app.get('/', async (req, res) => {
+  res.send('Endpoints: [/foxgirl, /wolfgirl, /catgirl]')
+})
+
+app.listen(port, async () => {
+  log.info(`API listening on port ${port}!`)
+})
+
+async function sendWebhook (imageData) {
+  const webhookContent = {
+    username: 'mimi.usbwire.net',
+    files: [imageData.image]
+  }
+  try {
+    await webhookClient.send(webhookContent)
+  } catch (e) {
+    log.error(e)
+  }
+}
 
 // global ratelimit stuff so that sky doesn't overload my server
 async function addGlobalRatelimit () {
@@ -104,10 +149,8 @@ async function getRedirect (req, res, rating = 'g', tag = 'fox') {
   const requestCount = cached.ips[originalIp]?.requests
   // get cached data
   const dataCached = await dataIsCached(originalIp)
-  if
-  (
-    dataCached && // cached data
-    (
+  if (
+    dataCached && ( // cached data
       requestCount >= config.requestsPer || // too many requests for this ip
       cached.requests >= config.requestsMax || // too many requests globally
       cached.ratelimit === true // ratelimited by danbooru
@@ -134,6 +177,7 @@ async function writeImageData (res, data) {
   res.header('content-type', data.mime) // required for the image to display properly in browsers
   res.write(data.image)
   log.info(`Served image: ${data.url} as https://danbooru.donmai.us/posts/${data.data.id}`)
+  sendWebhook(data)
   return true
 }
 
@@ -141,10 +185,8 @@ async function getImage (req, res, rating = 'g', tag = 'fox') {
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const requestCount = cached.ips[originalIp]?.requests
   const dataCached = await dataIsCached(originalIp)
-  if
-  (
-    dataCached && // cached data
-    (
+  if (
+    dataCached && ( // data cached
       requestCount >= config.requestsPer || // too many requests for this ip
       cached.requests >= config.requestsMax || // too many requests globally
       cached.ratelimit === true // ratelimited by danbooru
@@ -194,36 +236,6 @@ async function determineEndpoint (req, res, endpoint = 'foxgirl') {
   }
   return true
 }
-
-app.get(/^\/foxgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
-  await determineEndpoint(req, res, 'foxgirl')
-})
-
-app.get(/^\/wolfgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
-  await determineEndpoint(req, res, 'wolfgirl')
-})
-
-app.get(/^\/catgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
-  await determineEndpoint(req, res, 'catgirl')
-})
-
-app.get(/^\/custom(?:\/.*)?$/, async (req, res) => {
-  let tag = req.query?.tag ?? 'foxgirl'
-  let rating = req.query?.rating ?? 'g'
-  const redirect = req.query?.redirect ?? false
-  if (tags[tag] == null) tag = 'foxgirl'
-  if (rating !== 'g' && rating !== 's' && rating !== 'q') rating = 'g'
-  if (redirect) await getRedirect(req, res, rating, tag)
-  else await getImage(req, res, rating, tag)
-})
-
-app.get('/', async (req, res) => {
-  res.send('Endpoints: [/foxgirl, /wolfgirl, /catgirl]')
-})
-
-app.listen(port, async () => {
-  log.info(`API listening on port ${port}!`)
-})
 
 async function requestTag (type = 'fox', rating = 'g', image = true) {
   const tag = await arrayRandomizer(tags[type])
