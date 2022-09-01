@@ -1,7 +1,7 @@
 haha foxgirl go brr  
   
 ![Sample Foxgirl](https://foxgirl.usbwire.net/fromthegithub)  
-or just use this domain https://foxgirl.usbwire.net/  
+use this domain https://foxgirl.usbwire.net/  
 my main website at https://usbwire.net/  
 
 uses Caddy and Express together  
