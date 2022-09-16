@@ -73,8 +73,12 @@ app.get(/^\/custom(?:\/.*)?$/, async (req, res) => {
   else await getImage(req, res, rating, tag)
 })
 
+app.get(/^\/cached?$/, async (req, res) => {
+  await getCache(req, res)
+})
+
 app.get('/', async (req, res) => {
-  res.send('Endpoints: [/foxgirl, /wolfgirl, /catgirl]')
+  res.redirect('https://usbwire.net/posts/mimi/')
 })
 
 app.listen(port, async () => {
@@ -142,6 +146,18 @@ async function dataIsCached (ip) {
   return false
 }
 
+async function getCache (req, res) {
+  const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
+  const dataCached = await dataIsCached(originalIp)
+  if (dataCached) {
+    await cacheData(req, dataCached)
+    await writeImageData(res, dataCached)
+    return res.end()
+  } else {
+    return res.redirect('https://mimi.usbwire.net/')
+  }
+}
+
 async function getRedirect (req, res, rating = 'g', tag = 'fox') {
   // get real ip
   const originalIp = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
@@ -163,7 +179,10 @@ async function getRedirect (req, res, rating = 'g', tag = 'fox') {
   const data = await cachedTag(originalIp, tag, rating)
   if (data?.url == null && dataCached) return res.redirect(dataCached.url)
   else if (data?.url == null) return res.redirect('https://usbwire.net')
-  if (data?.url && data?.image) await cacheData(req, data)
+  if (data?.url && data?.image) {
+    await cacheData(req, data)
+    sendWebhook(data)
+  }
   await addGlobalRatelimit()
   res.redirect(data.url)
 }
@@ -171,13 +190,15 @@ async function getRedirect (req, res, rating = 'g', tag = 'fox') {
 // writes necessary image data
 // because otherwise image won't embed properly on discord
 async function writeImageData (res, data) {
-  res.header('mimi-image', data.url)
-  res.header('mimi-post', `https://danbooru.donmai.us/posts/${data.data.id}`)
-  res.header('mimi-tags', data.tags)
-  res.header('content-type', data.mime) // required for the image to display properly in browsers
+  res.set({
+    'Content-Type': data.mime,
+    'mimi-image': data.url,
+    'mimi-post': `https://danbooru.donmai.us/posts/${data.data.id}`,
+    'mimi-tags': data.tags,
+    'mimi-id': data.data.id
+  })
   res.write(data.image)
   log.info(`Served image: ${data.url} as https://danbooru.donmai.us/posts/${data.data.id}`)
-  sendWebhook(data)
   return true
 }
 
@@ -192,10 +213,8 @@ async function getImage (req, res, rating = 'g', tag = 'fox') {
       cached.ratelimit === true // ratelimited by danbooru
     )
   ) {
-    const cached304 = cached.ips[originalIp]?.url === req.url // can we just return a 304 instead of sending the same image
     await cacheData(req, dataCached)
-    if (cached304) res.status(304)
-    else await writeImageData(res, dataCached)
+    await writeImageData(res, dataCached)
     return res.end()
   }
   const data = await cachedTag(originalIp, tag, rating)
@@ -207,10 +226,25 @@ async function getImage (req, res, rating = 'g', tag = 'fox') {
   else {
     await writeImageData(res, data)
     await cacheData(req, data)
+    sendWebhook(data)
   }
   await addGlobalRatelimit()
-  res.status(200)
-  res.end()
+  res.status(200).end()
+}
+
+async function getImageRaw (req, res, rating = 'g', tag = 'fox_girl') {
+  try {
+    const request = await requestTagRaw(tag, rating, true)
+    const response = request.responseData
+    const image = request.imageData
+    const data = { data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime }
+    await writeImageData(res, data)
+    await addGlobalRatelimit()
+    res.status(200).end()
+  } catch (e) {
+    log.error(e)
+    res.status(500).end()
+  }
 }
 
 async function determineEndpoint (req, res, endpoint = 'foxgirl') {
@@ -228,6 +262,11 @@ async function determineEndpoint (req, res, endpoint = 'foxgirl') {
       await getRedirect(req, res, 'g', endpoint)
       break
     }
+    case 'c': {
+      await getCache(req, res)
+      break
+    }
+    case 'safe':
     case '':
     default: {
       await getImage(req, res, 'g', endpoint)
@@ -285,7 +324,8 @@ async function addCachedTag (type = 'fox', rating = 'g') {
   if (cached[rating][type] == null) cached[rating][type] = []
   const response = request.responseData
   const image = request.imageData
-  cached[rating][type].push({ data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime })
+  const jsonData = { data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime }
+  cached[rating][type].push(jsonData)
 }
 
 async function downloadImage (url, base64 = true) {
@@ -297,12 +337,13 @@ async function downloadImage (url, base64 = true) {
     log.debug('Done!')
     const raw = Buffer.from(response.data, 'binary')
     const mime = response.headers['content-type'] // ex: image/png
-    if (base64 === false) return { image: raw, mime: mime }
+    if (base64 === false) return { image: raw, mime }
     const rawBase64 = raw.toString('base64')
     const base64data = `data:${mime};base64,${rawBase64}`
-    return { image: base64data, mime: mime }
+    return { image: base64data, mime }
   } catch (error) {
     const response = error?.response
+    log.error(response.data)
     if (response == null || response?.status == null) return null
     switch (response.status) {
       case 429: {
@@ -340,9 +381,9 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
   if (cached.ratelimit === true) return null
   // rating can be 'g,s' but that adds suggestive content which can get me booped by Discord
   // example of extreme "suggestive": https://cdn.donmai.us/original/fb/ec/__kitsune_onee_san_original_drawn_by_akitsuki_karasu__fbecb3a960885c4227d474c0d36b66d6.png
-  // https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>10 rating:g (fox_girl)
-  const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg,gif score:>5 favcount:>10 rating:${rating} (${tag})`
-  // `https://danbooru.donmai.us/posts/random?tags=filetype:png,jpg score:>5 favcount:>10 rating:${rating} (${tag})`
+  // https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>5 rating:g (fox_girl)
+  const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg,gif score:>5 favcount:>5 rating:${rating} (${tag})`
+  // `https://danbooru.donmai.us/posts/random?tags=filetype:png,jpg score:>5 favcount:>5 rating:${rating} (${tag})`
   try {
     log.debug(`Fetching [${tag}]...`)
     const response = await axios.get(url)
@@ -360,6 +401,7 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
     return responseJson
   } catch (error) {
     const response = error?.response
+    log.error(response.data)
     if (response == null || response?.status == null) return null
     switch (response.status) {
       case 429: {
