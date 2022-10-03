@@ -12,7 +12,6 @@ const webhookClient = new discord.WebhookClient({ url: process.env.WEBHOOK_URL }
 
 // this is required so that the ip forwarded from Caddy is trusted
 app.set('trust proxy', (ip) => {
-  console.log(ip)
   if (ip === '127.0.0.1') return true // only localhost
   else return false
 })
@@ -26,9 +25,10 @@ const tags = {
   foxgirl: ['solo fox_girl'],
   wolfgirl: ['solo wolf_girl'],
   catgirl: ['solo cat_girl'],
-  mimi: ['animal_ear_fluff'],
-  excluded: ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization', 'animal_costume', 'cosplay_photo']
+  mimi: ['animal_ear_fluff']
 }
+const endpoints = getObjectNames(tags)
+const tagsExcluded = ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization', 'animal_costume', 'cosplay_photo']
 
 const config = {
   requestsPer: 5,
@@ -86,6 +86,7 @@ app.listen(port, async () => {
 })
 
 async function sendWebhook (imageData) {
+  if (imageData?.rating !== 'g') return
   const webhookContent = {
     username: 'mimi.usbwire.net',
     files: [imageData.image]
@@ -232,21 +233,6 @@ async function getImage (req, res, rating = 'g', tag = 'fox') {
   res.status(200).end()
 }
 
-async function getImageRaw (req, res, rating = 'g', tag = 'fox_girl') {
-  try {
-    const request = await requestTagRaw(tag, rating, true)
-    const response = request.responseData
-    const image = request.imageData
-    const data = { data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime }
-    await writeImageData(res, data)
-    await addGlobalRatelimit()
-    res.status(200).end()
-  } catch (e) {
-    log.error(e)
-    res.status(500).end()
-  }
-}
-
 async function determineEndpoint (req, res, endpoint = 'foxgirl') {
   const restUri = req.params['0']
   switch (restUri) {
@@ -324,7 +310,8 @@ async function addCachedTag (type = 'fox', rating = 'g') {
   if (cached[rating][type] == null) cached[rating][type] = []
   const response = request.responseData
   const image = request.imageData
-  const jsonData = { data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime }
+  if (response == null || image == null) return null
+  const jsonData = { data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime, rating, type }
   cached[rating][type].push(jsonData)
 }
 
@@ -366,7 +353,7 @@ async function downloadImage (url, base64 = true) {
 async function excludeTags (inputTags) {
   const inputTag = inputTags.split(' ')
   for (const tag of inputTag) {
-    for (const excludedTag of tags.excluded) {
+    for (const excludedTag of tagsExcluded) {
       if (tag === excludedTag) {
         log.error(`Excluded tag: ${tag}...`)
         return true
@@ -423,4 +410,12 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
 async function arrayRandomizer (array) {
   const random = Math.floor(Math.random() * array.length)
   return array[random]
+}
+
+function getObjectNames (object) {
+  const objectNames = []
+  for (const name of Object.keys(object)) {
+    objectNames.push(name)
+  }
+  return objectNames
 }
