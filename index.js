@@ -30,6 +30,13 @@ const tags = {
 const endpoints = getObjectNames(tags)
 const tagsExcluded = ['furry', 'animal_nose', 'body_fur', 'fake_animal_ears', 'animalization', 'animal_costume', 'cosplay_photo']
 
+const tag = {
+  queue: [],
+  full: [],
+  busy: false,
+  limit: 5
+}
+
 const config = {
   requestsPer: 5,
   requestsMax: 15,
@@ -42,25 +49,14 @@ const cached = {
   requests: 0,
   requestsTimeout: null,
   ratelimit: false,
-  ratelimitTimeout: null
+  ratelimitTimeout: null,
+  delay: 0
 }
 
 // logging >w<
 app.use(async (req, res, next) => {
   log.info(`${req.method}:${req.url} ${res.statusCode}`)
   next()
-})
-
-app.get(/^\/foxgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
-  await determineEndpoint(req, res, 'foxgirl')
-})
-
-app.get(/^\/wolfgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
-  await determineEndpoint(req, res, 'wolfgirl')
-})
-
-app.get(/^\/catgirl(?:\/(\w+))?(?:\/.*)?$/, async (req, res) => {
-  await determineEndpoint(req, res, 'catgirl')
 })
 
 app.get(/^\/custom(?:\/.*)?$/, async (req, res) => {
@@ -73,20 +69,29 @@ app.get(/^\/custom(?:\/.*)?$/, async (req, res) => {
   else await getImage(req, res, rating, tag)
 })
 
-app.get(/^\/cached?$/, async (req, res) => {
+app.get('/cache', async (req, res) => {
   await getCache(req, res)
 })
 
 app.get('/', async (req, res) => {
-  res.redirect('https://usbwire.net/posts/mimi/')
+  res.redirect('/random')
+})
+
+app.get('/help', async (req, res) => {
+  res.redirect('https://usbwire.net/posts/mimi')
+})
+
+app.get(/^\/(\w+)(?:\/(\w+))?(?:\/.*)?$/, async (req, res, next) => {
+  await determineEndpoint(req, res, next)
 })
 
 app.listen(port, async () => {
   log.info(`API listening on port ${port}!`)
+  randomQueueTag()
 })
 
 async function sendWebhook (imageData) {
-  if (imageData?.rating !== 'g') return
+  if (imageData?.rating !== 'g' || !imageData?.image) return // horny no more!
   const webhookContent = {
     username: 'mimi.usbwire.net',
     files: [imageData.image]
@@ -233,9 +238,13 @@ async function getImage (req, res, rating = 'g', tag = 'fox') {
   res.status(200).end()
 }
 
-async function determineEndpoint (req, res, endpoint = 'foxgirl') {
-  const restUri = req.params['0']
-  switch (restUri) {
+async function determineEndpoint (req, res, next) {
+  let endpoint = req.params['0']
+  const modifier = req.params['1']
+  if (endpoint === 'random') endpoint = await arrayRandomizer(endpoints)
+  else if (!endpoints.includes(endpoint)) return next()
+  log.info(`Requesting: ${endpoint}:${modifier}`)
+  switch (modifier) {
     case 'nsfw': {
       await getImage(req, res, 'q', endpoint)
       break
@@ -262,7 +271,7 @@ async function determineEndpoint (req, res, endpoint = 'foxgirl') {
   return true
 }
 
-async function requestTag (type = 'fox', rating = 'g', image = true) {
+async function requestTag (type = 'foxgirl', rating = 'g', image = true) {
   const tag = await arrayRandomizer(tags[type])
   return await requestTagRaw(tag, rating, image)
 }
@@ -270,82 +279,120 @@ async function requestTag (type = 'fox', rating = 'g', image = true) {
 async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = true) {
   const response = await requestDanbooru(tag, rating)
   // if image response isn't expected, just return senko
-  if (response == null || response.url == null || response.data?.success === false || response.tags == null) return null
+  if (response == null || response.url == null || response.data?.success === false || response.tags == null) {
+    log.error('Image has invalid data in it??')
+    await sleep(cached.delay)
+    return await requestTagRaw(tag, rating, image)
+  }
   // otherwise if it is flagged, request a new one
   if ((response.data?.is_flagged || response.data?.is_deleted || response.data?.is_pending || response.data?.is_banned) === true) {
     log.error('Image is flagged, deleted, pending, or banned... > Requesting new image...')
+    await sleep(cached.delay)
     return await requestTagRaw(tag, rating, image)
   }
   const excluded = await excludeTags(response.tags)
   if (excluded === true) {
+    await sleep(cached.delay)
     return await requestTagRaw(tag, rating, image)
   }
   if (image === false) return { responseData: response, imageData: null }
   const downloadedImage = await downloadImage(response.url, false)
-  if (downloadedImage == null) return { responseData: response, imageData: null }
+  if (downloadedImage == null) {
+    await sleep(cached.delay)
+    return await requestTagRaw(tag, rating, image)
+  }
   return { responseData: response, imageData: downloadedImage }
 }
 
-async function cachedTag (ip, type = 'fox', rating = 'g') {
+async function cachedTag (ip, type = 'foxgirl', rating = 'g') {
   // ratelimited? return previous Image
   if (cached.ratelimit === true && cached.ips[ip].previousImage) return cached.ips[ip].previousImage
   else if (cached.ratelimit === true) return null
-  if (cached[rating] == null) cached[rating] = {}
-  if (cached[rating][type] == null) cached[rating][type] = []
-  if (cached[rating][type].length <= 5) {
-    if (cached[rating][type].length === 0) await addCachedTag(type, rating)
-    addCachedTag(type, rating)
-  }
-  addCachedTag(type, rating) // always add a new tag to the cache
+  await queueTag(type, rating)
   const data = cached[rating][type][0]
   if (cached[rating][type].length > 0 && cached.ratelimit === false) cached[rating][type].splice(0, 1)
   return data
 }
 
-async function addCachedTag (type = 'fox', rating = 'g') {
-  if (cached.ratelimit === true) return null
-  const request = await requestTag(type, rating, true)
-  if (request == null) return null
+async function randomQueueTag (attempts = 0) {
+  if (tag.queue.length > 0) return // we may get a request while running this function
+  const random = await arrayRandomizer(endpoints)
+  if (cached.g == null) cached.g = {}
+  if (cached.g[random] == null) cached.g[random] = []
+  if (cached.g[random].length <= tag.limit) {
+    await queueTag(random, 'g')
+  } else if (attempts <= tag.limit) {
+    attempts++
+    await randomQueueTag(attempts)
+  }
+}
+
+async function queueTag (type = 'foxgirl', rating = 'g') {
   if (cached[rating] == null) cached[rating] = {}
   if (cached[rating][type] == null) cached[rating][type] = []
+  if (cached[rating][type].length === 0) await addCachedTag(type, rating)
+  tag.queue.push([type, rating])
+  log.debug(`Added to queue: ${type}:${rating}`)
+  if (tag.busy === false) requeueTag()
+}
+
+async function requeueTag () {
+  if (tag.queue.length === 0) {
+    tag.busy = false
+    return
+  }
+  if (tag.busy === true) return
+  tag.busy = true
+  if (cached.ratelimit === true) await sleep(config.ratelimitMs)
+  const [type, rating] = tag.queue.shift()
+  await addCachedTag(type, rating)
+  if (cached.delay > 0) {
+    await sleep(cached.delay)
+    cached.delay = Math.max(0, cached.delay - 250)
+  } else if (cached.delay < 0) cached.delay = 0
+  tag.busy = false
+  if (tag.queue.length > 0) return await requeueTag()
+  else if (cached[rating][type].length <= tag.limit) return await queueTag(type, rating)
+  else await randomQueueTag()
+}
+
+async function addCachedTag (type = 'foxgirl', rating = 'g') {
+  if (cached.ratelimit === true) return null
+  log.debug(`Adding to cache: ${type}:${rating}`)
+  const request = await requestTag(type, rating, true)
+  if (request == null) return null
   const response = request.responseData
   const image = request.imageData
   if (response == null || image == null) return null
   const jsonData = { data: response.data, url: response.url, image: image.image, tags: response.tags, mime: image.mime, rating, type }
+  log.debug(`Added! ${type}:${rating}`)
   cached[rating][type].push(jsonData)
 }
 
-async function downloadImage (url, base64 = true) {
+async function downloadImage (url) {
   if (cached.ratelimit === true) return null
-  log.debug('Downloading and encoding image...')
+  log.debug(`Downloading image from: ${url}`)
   try {
-    const response = await axios.get(url, { responseType: 'arraybuffer' })
+    const response = await axios.get(url, { headers: { 'User-Agent': 'axios/0.27.2 (https://mimi.usbwire.net)' }, responseType: 'arraybuffer' })
     if (response.status !== 200) return null
-    log.debug('Done!')
+    log.debug(`Downloaded image! ${url}`)
     const raw = Buffer.from(response.data, 'binary')
     const mime = response.headers['content-type'] // ex: image/png
-    if (base64 === false) return { image: raw, mime }
-    const rawBase64 = raw.toString('base64')
-    const base64data = `data:${mime};base64,${rawBase64}`
-    return { image: base64data, mime }
+    return { image: raw, mime }
   } catch (error) {
     const response = error?.response
     log.error(response.data)
     if (response == null || response?.status == null) return null
     switch (response.status) {
+      case 503:
+      case 502:
+      case 500:
       case 429: {
-        cached.ratelimit = true
-        log.error('Too many image requests!')
-        clearTimeout(cached.ratelimitTimeout)
-        cached.ratelimitTimeout = setTimeout(() => {
-          cached.ratelimit = false
-        }, config.ratelimitMs)
-        return null
-      }
-      default: {
-        return null
+        cached.delay += 4000
       }
     }
+    cached.delay += 1000
+    return null
   }
 }
 
@@ -363,7 +410,7 @@ async function excludeTags (inputTags) {
   return false
 }
 
-async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
+async function requestDanbooru (tag = 'fox_girl', rating = 'g', highres = false) {
   const responseJson = { data: null, url: null, tags: null }
   if (cached.ratelimit === true) return null
   // rating can be 'g,s' but that adds suggestive content which can get me booped by Discord
@@ -372,11 +419,12 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
   const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg,gif score:>5 favcount:>5 rating:${rating} (${tag})`
   // `https://danbooru.donmai.us/posts/random?tags=filetype:png,jpg score:>5 favcount:>5 rating:${rating} (${tag})`
   try {
-    log.debug(`Fetching [${tag}]...`)
-    const response = await axios.get(url)
+    log.debug(`Fetching tags: [${tag}] with rating: [${rating}]...`)
+    const response = await axios.get(url, { headers: { 'User-Agent': 'axios/0.27.2 (https://mimi.usbwire.net)' } })
     if (response.status !== 200) return null // this shouldn't be reached if the request is successful
-    const responseUrl = response.data.large_file_url ?? response.data.file_url
-    log.debug(`Post: https://danbooru.donmai.us/posts/${response.data.id} || Rating: ${response.data.rating} || File: ${responseUrl}\nTags: ${response.data.tag_string}`)
+    let responseUrl = response.data.large_file_url // large_file_url is smaller than file_url but is less quality
+    if (highres === true) responseUrl = response.data.file_url
+    log.debug(`Fetched! Post: https://danbooru.donmai.us/posts/${response.data.id} || Rating: ${response.data.rating} || File: ${responseUrl}`)
     if (responseUrl == null) { // sometimes, url isn't returned by API || needs further debugging
       log.error('No image found in API response!')
       log.error(response.data)
@@ -391,19 +439,26 @@ async function requestDanbooru (tag = 'fox_girl', rating = 'g', raw = false) {
     log.error(response.data)
     if (response == null || response?.status == null) return null
     switch (response.status) {
-      case 429: {
-        cached.ratelimit = true
-        log.error('Too many API requests!')
-        clearTimeout(cached.ratelimitTimeout)
-        cached.ratelimitTimeout = setTimeout(() => {
-          cached.ratelimit = false
-        }, config.ratelimitMs)
-        return null
+      case 404:
+      case 400: {
+        await log.error('URL is malformed: invalid tags')
+        process.exit(1)
+        break
       }
-      default: {
-        return null
+      case 503:
+      case 502:
+      case 500: {
+        log.error('Server is having issues!')
+        cached.delay += 2000
+        break
+      }
+      case 429: {
+        cached.delay += 4000
+        break
       }
     }
+    cached.delay += 1000
+    return null
   }
 }
 
@@ -419,3 +474,5 @@ function getObjectNames (object) {
   }
   return objectNames
 }
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
