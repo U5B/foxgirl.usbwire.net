@@ -1,7 +1,6 @@
-process.env.DEBUG = 'log,chat,info,debug,error,verbose,warn'
-
-const fs = require('fs')
-const util = require('util')
+import fs from 'fs'
+import Debug from 'debug'
+import chalk from 'chalk'
 
 const logFolderPath = './logs'
 if (!fs.existsSync(logFolderPath)) fs.mkdirSync(logFolderPath)
@@ -23,15 +22,14 @@ let fileError = fs.createWriteStream(`${errorPath.prefix}${currentDay}${errorPat
 let fileDebug = fs.createWriteStream(`${debugPath.prefix}${currentDay}${debugPath.suffix}`, { flags: 'a' })
 
 const debug = {
-  chat: require('debug')('chat'),
-  log: require('debug')('log'),
-  info: require('debug')('info'),
-  debug: require('debug')('debug'),
-  verbose: require('debug')('verbose'),
-  error: require('debug')('error'),
-  warn: require('debug')('warn')
+  chat: Debug('chat'),
+  log: Debug('log'),
+  info: Debug('info'),
+  debug: Debug('debug'),
+  verbose: Debug('verbose'),
+  error: Debug('error'),
+  warn: Debug('warn')
 }
-const chalk = require('chalk')
 const errors = chalk.bold.red
 const warns = chalk.bold.yellow
 debug.chat.color = 10
@@ -126,7 +124,7 @@ log.log = async function (input) {
   const output = await getContent(input)
   debug.log(output)
 }
-log.info = async function (input) {
+log.log = async function (input) {
   const output = await getContent(input)
   await logToFile(output, 'info')
   debug.info(output)
@@ -152,5 +150,4 @@ log.error = async function (input) {
   output = await addColor(output, 'error')
   debug.error(output)
 }
-
-module.exports = log
+export default log
