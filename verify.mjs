@@ -4,38 +4,46 @@ import { cached } from './cache.mjs'
 import { requestImage, downloadImage } from './danbooru.mjs'
 import { randomTag, excludeTags } from './tags.mjs'
 
-export async function requestTag (type = 'foxgirl', rating = 'g', image = true, highres = false) {
-  const tag = await randomTag(type)
-  const request = await requestTagRaw(tag, rating, image, highres)
-  request.type = type
+/**
+ * 
+ * @param {String} endpoint - a valid endpoint
+ * @param {import('./type.mjs').rating} rating 
+ * @param {Boolean} image - want an image?
+ * @param {Boolean} hd - or an HD image?
+ * @returns 
+ */
+export async function requestTag (endpoint = 'foxgirl', rating = 'g', image = true, hd = false) {
+  const tag = await randomTag(endpoint)
+  const request = await requestTagRaw(tag, rating, image, hd)
+  request.endpoint = endpoint
   return request
 }
 
-export async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = true, highres = false) {
+export async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = true, hd = false) {
   const response = await requestImage(tag, rating)
   // API has specifically failed
   if (response === false) {
     log.error('Image has invalid data in it??')
     if (cached.delay > 0) await util.sleep(cached.delay)
-    return await requestTagRaw(tag, rating, image, highres)
+    return await requestTagRaw(tag, rating, image, hd)
   }
   const excluded = await excludeTags(response.tags)
   if (excluded.found === true) {
     log.error(`Blacklisted tag: ${excluded.tag}`)
     if (cached.delay > 0) await util.sleep(cached.delay)
-    return await requestTagRaw(tag, rating, image, highres)
+    return await requestTagRaw(tag, rating, image, hd)
   }
   if (image === false) {
     const data = await newRequest(response, null, tag, rating)
     return data
   }
-  const url = highres === true ? response.urlhd : response.url
+  const url = hd === true ? response.urlhd : response.url
   if (cached.delay > 0) await util.sleep(cached.delay)
   const downloadedImage = await downloadImage(url)
   if (downloadedImage === false) {
     log.error('Image failed to download...')
     if (cached.delay > 0) await util.sleep(cached.delay)
-    return await requestTagRaw(tag, rating, image, highres)
+    return await requestTagRaw(tag, rating, image, hd)
   }
   const data = await newRequest(response, downloadedImage, tag, rating)
   return data

@@ -76,12 +76,12 @@ export async function dataIsCached (ip) {
   return false
 }
 
-export async function cachedTag (ip, type = 'foxgirl', rating = 'g') {
+export async function cachedTag (ip, endpoint = 'foxgirl', rating = 'g') {
   // ratelimited? return previous Image
   if (cached.ratelimit === true && cached.ips[ip].previousImage) return cached.ips[ip].previousImage
   else if (cached.ratelimit === true) return null
-  await queueTag(type, rating)
-  const data = cached[rating][type][0]
-  if (cached[rating][type].length > 0 && cached.ratelimit === false) cached[rating][type].splice(0, 1)
+  await queueTag(endpoint, rating)
+  const data = cached[rating][endpoint][0]
+  if (cached[rating][endpoint].length > 0 && cached.ratelimit === false) cached[rating][endpoint].splice(0, 1)
   return data
 }

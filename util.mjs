@@ -1,6 +1,12 @@
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 /**
- * @param {String[]} array
+ * sleep tight
+ * @param {Number} ms - time in ms to sleep 
+ */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Select a random index from an array
+ * @param {Array} array - it better be an array
  */
 async function arrayRandomizer (array) {
   const random = Math.floor(Math.random() * array.length)
@@ -9,8 +15,8 @@ async function arrayRandomizer (array) {
 
 /**
  * Get object's keys in array form
- * @param {Object} object
- * @returns {String[]} array of object keys
+ * @param {Object<String, any>} object - object with keys!
+ * @returns {String[]} - array of object keys
  */
 function getObjectNames (object) {
   const objectNames = []

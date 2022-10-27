@@ -10,20 +10,21 @@ export async function randomQueueTag (attempts = 0) {
   const random = await randomEndpoint()
   if (cached.g == null) cached.g = {}
   if (cached.g[random] == null) cached.g[random] = []
-  if (cached.g[random].length <= tag.limit) {
+  const limit = tag.limit[random] ?? tag.limit.default
+  if (cached.g[random].length <= limit) {
     await queueTag(random, 'g')
-  } else if (attempts <= tag.limit) {
+  } else if (attempts <= tag.limit.default) {
     attempts++
     await randomQueueTag(attempts)
   }
 }
 
-export async function queueTag (type = 'foxgirl', rating = 'g') {
+export async function queueTag (endpoint = 'foxgirl', rating = 'g') {
   if (cached[rating] == null) cached[rating] = {}
-  if (cached[rating][type] == null) cached[rating][type] = []
-  if (cached[rating][type].length === 0) await addTag(type, rating, true, false)
-  tag.queue.push([type, rating])
-  log.debug(`Added to queue: ${type}:${rating} #${cached[rating][type].length}`)
+  if (cached[rating][endpoint] == null) cached[rating][endpoint] = []
+  if (cached[rating][endpoint].length === 0) await addTag(endpoint, rating, true, false)
+  tag.queue.push([endpoint, rating])
+  log.debug(`Added to queue: ${endpoint}:${rating} #${cached[rating][endpoint].length}`)
   if (tag.busy === false) requeueTag()
 }
 
@@ -35,24 +36,25 @@ async function requeueTag () {
   if (tag.busy === true) return
   tag.busy = true
   if (cached.ratelimit === true) await util.sleep(config.delays.ratelimit)
-  const [type, rating] = tag.queue.shift()
-  await addTag(type, rating, true, false)
+  const [endpoint, rating] = tag.queue.shift()
+  await addTag(endpoint, rating, true, false)
   if (cached.delay > 0) {
     await util.sleep(cached.delay)
     cached.delay = Math.max(0, cached.delay - 250)
   } else if (cached.delay < 0) cached.delay = 0
   tag.busy = false
+  const limit = tag.limit[endpoint] ?? tag.limit.default
   if (tag.queue.length > 0) return await requeueTag()
-  else if (cached[rating][type].length <= tag.limit) return await queueTag(type, rating)
+  else if (cached[rating][endpoint].length <= limit) return await queueTag(endpoint, rating)
   else await randomQueueTag()
 }
 
-async function addTag (type = 'foxgirl', rating = 'g', addCache = true, highres = false) {
+async function addTag (endpoint = 'foxgirl', rating = 'g', addCache = true, highres = false) {
   if (cached.ratelimit === true) return null
-  log.debug(`Adding to cache: ${type}:${rating}`)
-  const request = await requestTag(type, rating, true, highres)
+  log.debug(`Adding to cache: ${endpoint}:${rating}`)
+  const request = await requestTag(endpoint, rating, true, highres)
   if (request == null) return null
-  log.debug(`Added! ${type}:${rating}`)
-  if (addCache === true) cached[rating][type].push(request)
+  log.debug(`Added! ${endpoint}:${rating}`)
+  if (addCache === true) cached[rating][endpoint].push(request)
   else return request
 }

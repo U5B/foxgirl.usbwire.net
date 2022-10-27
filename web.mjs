@@ -17,15 +17,15 @@ const webhookClient = new discord.WebhookClient({ url: process.env.WEBHOOK_URL }
 async function writeImageData (res, data, download = false) {
   const headers = {
     'content-type': data.mime,
-    // 'content-disposition': `attachment; filename=${data.type}-${data.id}.${data.extension}`,
+    // 'content-disposition': `attachment; filename=${data.endpoint}-${data.id}.${data.extension}`,
     'content-length': data.image.length,
     'mimi-image': data.url,
     'mimi-post': `https://danbooru.donmai.us/posts/${data.id}`,
     'mimi-tags': data.tags,
-    'mimi-type': data.type,
+    'mimi-endpoint': data.endpoint,
     'mimi-rating': data.rating
   }
-  if (download === true) headers['content-disposition'] = `attachment; filename=${data.type}-${data.id}.${data.extension}`
+  if (download === true) headers['content-disposition'] = `attachment; filename=${data.endpoint}-${data.id}.${data.extension}`
   res.set(headers)
   res.write(data.image)
   log.log(`Served ${data.tag}.${data.extension}: ${data.url} as https://danbooru.donmai.us/posts/${data.id}`)
@@ -55,17 +55,17 @@ async function isCached (ip) {
  * @param {express.Request} req
  * @param {express.Response} res
  * @param {import('./type.mjs').rating} rating
- * @param {String} type
+ * @param {String} endpoint
  * @returns
  */
-export async function get (req, res, rating = 'g', type = 'fox', options = { image: true, forceCache: false, forceRaw: false, forceHD: false, forceDownload: false }) {
+export async function get (req, res, rating = 'g', endpoint = 'fox', options = { image: true, forceCache: false, forceRaw: false, forceHD: false, forceDownload: false }) {
   const ip = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const cachedData = await isCached(ip, req)
   if ((cachedData.cache || (cachedData.data && options.forceCache)) === true) return await sendData(req, res, cachedData.data, options.image)
   await addGlobalRatelimit()
   let data
-  if (options.forceRaw === false) data = await cachedTag(ip, type, rating)
-  else data = await requestTag(type, rating, options.image, options.forceHD)
+  if (options.forceRaw === false) data = await cachedTag(ip, endpoint, rating)
+  else data = await requestTag(endpoint, rating, options.image, options.forceHD)
   if (data?.image == null && cachedData.cache) {
     await sendData(req, res, cachedData.data, options.image, options.forceDownload)
   } else if (data?.image == null) return res.status(404).end()
@@ -107,7 +107,7 @@ export async function determineEndpoint (req, res, next) {
  *
  * @param {express.Request} req
  * @param {express.Response} res
- * @param {String} endpoint - a valid type in endpoints or "random"
+ * @param {String} endpoint - a valid endpoint in endpoints or "random"
  * @param {String} modifier - content rating modifier or image modifier
  * @param {String} modifier2 - image modifier
  * @returns
