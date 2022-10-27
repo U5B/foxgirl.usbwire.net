@@ -43,6 +43,7 @@ export async function requestImage (tag = 'fox_girl', rating = 'g') {
           break
         }
         case 429: {
+          log.error('Ratelimit hit!')
           cached.delay += 4000
           break
         }
@@ -51,6 +52,9 @@ export async function requestImage (tag = 'fox_girl', rating = 'g') {
           break
         }
       }
+    } else {
+      log.error(error)
+      cached.delay += 1000
     }
     return false
   }
@@ -90,6 +94,7 @@ export async function downloadImage (url) {
           break
         }
         case 429: {
+          log.error('Ratelimit hit!')
           cached.delay += 4000
           break
         }
@@ -98,6 +103,9 @@ export async function downloadImage (url) {
           break
         }
       }
+    } else {
+      log.error(error)
+      cached.delay += 1000
     }
     return false
   }

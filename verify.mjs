@@ -23,7 +23,7 @@ export async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = tru
   const response = await requestImage(tag, rating)
   // API has specifically failed
   if (response === false) {
-    log.error('Image has invalid data in it??')
+    log.error('API request failed!')
     if (cached.delay > 0) await util.sleep(cached.delay)
     return await requestTagRaw(tag, rating, image, hd)
   }
@@ -41,7 +41,7 @@ export async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = tru
   if (cached.delay > 0) await util.sleep(cached.delay)
   const downloadedImage = await downloadImage(url)
   if (downloadedImage === false) {
-    log.error('Image failed to download...')
+    log.error('Image download failed!')
     if (cached.delay > 0) await util.sleep(cached.delay)
     return await requestTagRaw(tag, rating, image, hd)
   }
