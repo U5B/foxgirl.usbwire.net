@@ -2,8 +2,8 @@ import 'dotenv/config'
 import express from 'express'
 
 import log from './log.mjs'
-import { determineEndpoint, serveEndpoint } from './web.mjs'
-import { randomQueueTag } from './queue.mjs'
+import { determineEndpoint, determineModifier } from './web.mjs'
+import { randomQueueEndpoint } from './queue.mjs'
 
 const app = express()
 
@@ -15,15 +15,11 @@ app.set('trust proxy', (ip) => {
 
 // logging >w<
 app.use(async (req, res, next) => {
-  log.log(`${req.method}:${req.url} ${res.statusCode}`)
+  log.warn(`${req.method}:${req.url} ${res.statusCode}`)
   next()
 })
 
-app.get('/', async (req, res) => {
-  await serveEndpoint(req, res, 'random', 'g') // serve random image with rating: g
-})
-
-app.get('/?', async (req, res) => {
+app.get('/help', async (req, res) => {
   res.redirect('https://usbwire.net/posts/mimi')
 })
 
@@ -31,7 +27,15 @@ app.get(/^\/(\w+)(?:\/(\w+))?(?:\/(\w+))?(?:\/.*)?$/, async (req, res, next) => 
   await determineEndpoint(req, res, next)
 })
 
+app.get(/^\/(\w+)?(?:\/(\w+))?(?:\/.*)?$/, async (req, res, next) => {
+  await determineModifier(req, res, next, 'random')
+})
+
+app.use(async (req, res, next) => {
+  res.status(404).end()
+})
+
 app.listen(process.env.PORT, async () => {
   log.log(`API listening on port ${process.env.PORT}!`)
-  randomQueueTag()
+  randomQueueEndpoint()
 })

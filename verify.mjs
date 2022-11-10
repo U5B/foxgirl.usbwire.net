@@ -5,20 +5,29 @@ import { requestImage, downloadImage } from './danbooru.mjs'
 import { randomTag, excludeTags } from './tags.mjs'
 
 /**
- * 
+ *
  * @param {String} endpoint - a valid endpoint
- * @param {import('./type.mjs').rating} rating 
+ * @param {import('./type.mjs').rating} rating
  * @param {Boolean} image - want an image?
  * @param {Boolean} hd - or an HD image?
- * @returns 
+ * @returns {Promise<import('./type.mjs').apiCombined>}
  */
 export async function requestTag (endpoint = 'foxgirl', rating = 'g', image = true, hd = false) {
   const tag = await randomTag(endpoint)
   const request = await requestTagRaw(tag, rating, image, hd)
   request.endpoint = endpoint
+  cached.lastData = request
   return request
 }
 
+/**
+ *
+ * @param {String} tag - a valid Danbooru tag
+ * @param {import('./type.mjs').rating} rating
+ * @param {Boolean} image - want an image?
+ * @param {Boolean} hd - or an HD image?
+ * @returns {Promise<import('./type.mjs').apiCombined>}
+ */
 export async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = true, hd = false) {
   const response = await requestImage(tag, rating)
   // API has specifically failed
@@ -46,6 +55,7 @@ export async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = tru
     return await requestTagRaw(tag, rating, image, hd)
   }
   const data = await newRequest(response, downloadedImage, tag, rating)
+  cached.lastData = data
   return data
 }
 
@@ -65,6 +75,7 @@ async function newRequest (response, image, tag, rating) {
       tags: response.tags,
       url: response.url,
       urlhd: response.urlhd,
+      endpoint: tag,
       tag,
       rating
     }
@@ -78,6 +89,7 @@ async function newRequest (response, image, tag, rating) {
     image: image.image,
     mime: image.mime,
     extension: image.extension,
+    endpoint: tag,
     tag,
     rating
   }

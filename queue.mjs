@@ -5,20 +5,29 @@ import { tag, randomEndpoint } from './tags.mjs'
 import { cached } from './cache.mjs'
 import { requestTag } from './verify.mjs'
 
-export async function randomQueueTag (attempts = 0) {
-  if (tag.queue.length > 0) return // we may get a request while running this function
+/**
+ * add a random safe endpoint to the queue
+ * @param {Number} [attempts] - number of attempts to queue a new tag
+ */
+export async function randomQueueEndpoint (attempts = 0) {
+  if (tag.queue.length > 0 || tag.busy === true) return // we may get a request while running this function
   const random = await randomEndpoint()
   if (cached.g == null) cached.g = {}
   if (cached.g[random] == null) cached.g[random] = []
-  const limit = tag.limit[random] ?? tag.limit.default
+  const limit = tag.limit.g[random] ?? tag.limit.default
   if (cached.g[random].length <= limit) {
     await queueTag(random, 'g')
   } else if (attempts <= tag.limit.default) {
     attempts++
-    await randomQueueTag(attempts)
+    await randomQueueEndpoint(attempts)
   }
 }
 
+/**
+ * add specified endpoint with specified rating to the queue
+ * @param {String} endpoint
+ * @param {import('./type.mjs').rating} rating
+ */
 export async function queueTag (endpoint = 'foxgirl', rating = 'g') {
   if (cached[rating] == null) cached[rating] = {}
   if (cached[rating][endpoint] == null) cached[rating][endpoint] = []
@@ -28,6 +37,9 @@ export async function queueTag (endpoint = 'foxgirl', rating = 'g') {
   if (tag.busy === false) requeueTag()
 }
 
+/**
+ * this function should loop until the queue is empty
+ */
 async function requeueTag () {
   if (tag.queue.length === 0) {
     tag.busy = false
@@ -43,18 +55,25 @@ async function requeueTag () {
     cached.delay = Math.max(0, cached.delay - 250)
   } else if (cached.delay < 0) cached.delay = 0
   tag.busy = false
-  const limit = tag.limit[endpoint] ?? tag.limit.default
+  const limit = tag.limit[rating][endpoint] ?? tag.limit.default
   if (tag.queue.length > 0) return await requeueTag()
   else if (cached[rating][endpoint].length <= limit) return await queueTag(endpoint, rating)
-  else await randomQueueTag()
+  else await randomQueueEndpoint()
 }
 
-async function addTag (endpoint = 'foxgirl', rating = 'g', addCache = true, highres = false) {
+/**
+ * request data with endpoint and rating
+ * @param {String} endpoint
+ * @param {import('./type.mjs').rating} rating - content rating
+ * @param {Boolean} toCache - add data to cache
+ * @param {Boolean} hd - get an HD image!
+ */
+export async function addTag (endpoint = 'foxgirl', rating = 'g', toCache = true, hd = false) {
   if (cached.ratelimit === true) return null
   log.debug(`Adding to cache: ${endpoint}:${rating}`)
-  const request = await requestTag(endpoint, rating, true, highres)
+  const request = await requestTag(endpoint, rating, true, hd)
   if (request == null) return null
   log.debug(`Added! ${endpoint}:${rating}`)
-  if (addCache === true) cached[rating][endpoint].push(request)
-  else return request
+  if (toCache === true) cached[rating][endpoint].push(request)
+  return request
 }

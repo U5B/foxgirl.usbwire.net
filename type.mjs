@@ -2,7 +2,7 @@
  * @global
  * @typedef {Object} apiImage
  * @property {String} image - raw image
- * @property {String} mime - mimetype of the file: image/png, image/jpg, image/jpeg, image/gif
+ * @property {mime} mime - mimetype of the file: image/png, image/jpg, image/jpeg, image/gif
  * @property {String} extension - file extension: png, jpg, gif
  */
 
@@ -28,22 +28,22 @@
  * @property {mime} [mime] - mimetype of the file: image/png, image/jpg, image/jpeg, image/gif
  * @property {extension} [extension] - file extension: png, jpg, gif
  * @property {String} tag - tag used for this request
- * @property {String} rating - content rating used for this request
+ * @property {rating} rating - content rating used for this request
  */
 
 /**
  * @global
- * @typedef {"g"|"q"|"s"|"e"} rating
+ * @typedef {'g'|'q'|'s'} rating - content rating used for this request
  */
 
 /**
  * @global
- * @typedef {"image/png"|"image/jpg"|"image/jpeg"|"image/gif"} mime
+ * @typedef {"image/png"|"image/jpg"|"image/jpeg"|"image/gif"} mime - mimetype of the file: image/png, image/jpg, image/jpeg, image/gif
  */
 
 /**
  * @global
- * @typedef {"png"|"jpg"|"gif"} extension
+ * @typedef {"png"|"jpg"|"gif"} extension - file extension: png, jpg, gif
  */
 
 export const Types = {}

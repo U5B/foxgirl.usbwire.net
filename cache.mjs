@@ -3,12 +3,14 @@ import { queueTag } from './queue.mjs'
 
 export const cached = {
   ips: {},
+  lastData: null,
   requests: 0,
   requestsTimeout: null,
   ratelimit: false,
   ratelimitTimeout: null,
   delay: 0
 }
+
 /**
  * add more to the global ratelimit!
  */
@@ -54,7 +56,7 @@ async function postCache (ip) {
 /**
  * store cached data
  * @param {express.Request} req - request information
- * @param {} data - imageData
+ * @param {import('./type.mjs').apiCombined} data - imageData
  */
 export async function cacheData (req, data) {
   const ip = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
@@ -76,9 +78,16 @@ export async function dataIsCached (ip) {
   return false
 }
 
+/**
+ * queue a tag and also pull one from the cache
+ * @param {String} ip - ip address
+ * @param {String} endpoint
+ * @param {import('./type.mjs').rating} rating
+ * @returns
+ */
 export async function cachedTag (ip, endpoint = 'foxgirl', rating = 'g') {
-  // ratelimited? return previous Image
-  if (cached.ratelimit === true && cached.ips[ip].previousImage) return cached.ips[ip].previousImage
+  // ratelimited? return previous data
+  if (cached.ratelimit === true && cached.ips[ip].previousData) return cached.ips[ip].previousData
   else if (cached.ratelimit === true) return null
   await queueTag(endpoint, rating)
   const data = cached[rating][endpoint][0]

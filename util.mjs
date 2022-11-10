@@ -1,6 +1,6 @@
 /**
  * sleep tight
- * @param {Number} ms - time in ms to sleep 
+ * @param {Number} ms - time in ms to sleep
  */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 

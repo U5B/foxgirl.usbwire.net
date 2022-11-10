@@ -1,16 +1,15 @@
 import log from './log.mjs'
-import express from 'express'
 import discord from 'discord.js'
 import { config } from './config.mjs'
 import { requestTag } from './verify.mjs'
 import { cached, dataIsCached, cacheData, addGlobalRatelimit, cachedTag } from './cache.mjs'
-import { randomEndpoint, endpoints } from './tags.mjs'
+import { verifyEndpoint } from './tags.mjs'
 
 const webhookClient = new discord.WebhookClient({ url: process.env.WEBHOOK_URL })
 
 /**
  * writes necessary image data
- * @param {express.Response} res
+ * @param {import('express').Response} res
  * @param {import('./type.mjs').apiCombined} data
  * @param {Boolean} download - tell the browser to download the image
  */
@@ -52,11 +51,10 @@ async function isCached (ip) {
 
 /**
  *
- * @param {express.Request} req
- * @param {express.Response} res
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
  * @param {import('./type.mjs').rating} rating
  * @param {String} endpoint
- * @returns
  */
 export async function get (req, res, rating = 'g', endpoint = 'fox', options = { image: true, forceCache: false, forceRaw: false, forceHD: false, forceDownload: false }) {
   const ip = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
@@ -67,18 +65,17 @@ export async function get (req, res, rating = 'g', endpoint = 'fox', options = {
   if (options.forceRaw === false) data = await cachedTag(ip, endpoint, rating)
   else data = await requestTag(endpoint, rating, options.image, options.forceHD)
   if (data?.image == null && cachedData.cache) {
-    await sendData(req, res, cachedData.data, options.image, options.forceDownload)
+    return await sendData(req, res, cachedData.data, options.image, options.forceDownload)
   } else if (data?.image == null) return res.status(404).end()
   else {
     sendWebhook(data)
-    await sendData(req, res, data, options.image, options.forceDownload)
+    return await sendData(req, res, data, options.image, options.forceDownload)
   }
-  return res.status(200).end()
 }
 /**
  *
- * @param {express.Request} req
- * @param {express.Response} res
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
  * @param {import('./type.mjs').apiCombined} data
  * @param {Boolean} image - whenever to serve an image or to redirect you
  * @param {Boolean} download - if serving the image, download the image?
@@ -91,9 +88,9 @@ async function sendData (req, res, data, image = true, download = false) {
 }
 /**
  *
- * @param {express.Request} req
- * @param {express.Response} res
- * @param {express.NextFunction} next
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
  */
 export async function determineEndpoint (req, res, next) {
   const endpoint = req.params['0']
@@ -103,18 +100,32 @@ export async function determineEndpoint (req, res, next) {
   if (!success) return next()
   return true
 }
+
 /**
  *
- * @param {express.Request} req
- * @param {express.Response} res
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+export async function determineModifier (req, res, next, endpoint = 'random') {
+  const modifier = req.params['0']
+  const modifer2 = req.params['1'] ?? req.params['0']
+  const success = await serveEndpoint(req, res, endpoint, modifier, modifer2)
+  if (!success) return next()
+  return true
+}
+
+/**
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
  * @param {String} endpoint - a valid endpoint in endpoints or "random"
  * @param {String} modifier - content rating modifier or image modifier
  * @param {String} modifier2 - image modifier
- * @returns
  */
 export async function serveEndpoint (req, res, endpoint, modifier, modifier2) {
-  if (endpoint === 'random') endpoint = await randomEndpoint()
-  else if (!endpoints.includes(endpoint)) return false
+  endpoint = await verifyEndpoint(endpoint)
+  if (endpoint === false) return false
   log.log(`Requesting: ${endpoint}:${modifier}`)
   const options = { image: true, forceCache: false, forceRaw: false, forceHD: false, forceDownload: false }
   let rating = 'g'
@@ -127,6 +138,24 @@ export async function serveEndpoint (req, res, endpoint, modifier, modifier2) {
       rating = 's'
       break
     }
+    case 'r': {
+      options.image = false
+      break
+    }
+    case 'c': {
+      options.forceCache = true
+      break
+    }
+    case 'd': {
+      options.image = true
+      options.forceDownload = true
+      break
+    }
+    case 'w': {
+      options.forceHD = true
+      options.forceRaw = true
+      break
+    }
     default: {
       rating = 'g'
       break
@@ -136,34 +165,35 @@ export async function serveEndpoint (req, res, endpoint, modifier, modifier2) {
   switch (modifier2) {
     case 'r': {
       options.image = false
-      await get(req, res, rating, endpoint, options)
       break
     }
     case 'c': {
       options.forceCache = true
-      await get(req, res, rating, endpoint, options)
       break
     }
     case 'd': {
       options.image = true
       options.forceDownload = true
-      await get(req, res, rating, endpoint, options)
       break
     }
     case 'w': {
       options.forceHD = true
       options.forceRaw = true
-      await get(req, res, rating, endpoint, options)
       break
     }
     default: {
-      await get(req, res, rating, endpoint, options)
       break
     }
   }
+  await get(req, res, rating, endpoint, options)
   return true
 }
 
+/**
+ * send an image to a webhook
+ * @param {import('./type.mjs').apiCombined} data
+ */
+// TODO: add a check for image size (8MB limit)
 async function sendWebhook (data) {
   if (data?.rating !== 'g' || !data?.image) return // horny no more!
   const webhookContent = {
