@@ -4,6 +4,7 @@ import { config } from './config.mjs'
 import { requestTag } from './verify.mjs'
 import { cached, dataIsCached, cacheData, addGlobalRatelimit, cachedTag } from './cache.mjs'
 import { verifyEndpoint } from './tags.mjs'
+import { downloadImage } from './danbooru.mjs'
 
 const webhookClient = new discord.WebhookClient({ url: process.env.WEBHOOK_URL })
 
@@ -34,7 +35,6 @@ async function writeImageData (res, data, download = false) {
 /**
  * Check if we have cached data or not
  * @param {String} ip - ip address
- * @returns
  */
 async function isCached (ip) {
   const requestCount = cached.ips[ip]?.requests
@@ -59,7 +59,15 @@ async function isCached (ip) {
 export async function get (req, res, rating = 'g', endpoint = 'fox', options = { image: true, forceCache: false, forceRaw: false, forceHD: false, forceDownload: false }) {
   const ip = req.headers['cf-connecting-ip'] ?? req.headers['x-forwarded-for'] ?? req.ip
   const cachedData = await isCached(ip, req)
-  if ((cachedData.cache || (cachedData.data && options.forceCache)) === true) return await sendData(req, res, cachedData.data, options.image)
+  if ((cachedData.cache || (cachedData.data && options.forceCache)) === true) {
+    if (options.forceRaw === true) {
+      addGlobalRatelimit()
+      const url = options.forceHD ? cachedData.data.urlhd : cachedData.data.url
+      const downloadedImage = await downloadImage(url)
+      if (downloadedImage !== false) cachedData.data.image = downloadedImage
+    }
+    return await sendData(req, res, cachedData.data, options.image, options.forceDownload)
+  }
   await addGlobalRatelimit()
   let data
   if (options.forceRaw === false) data = await cachedTag(ip, endpoint, rating)

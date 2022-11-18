@@ -1,4 +1,5 @@
 import fs from 'fs'
+import util from 'util'
 import Debug from 'debug'
 import chalk from 'chalk'
 
@@ -55,7 +56,7 @@ async function removeWritestream (file) {
 }
 
 async function generateStream (input, path, time) {
-  if (input) input = removeWritestream(input)
+  if (input) input = await removeWritestream(input)
   input = await createWritestream(input, `${path.prefix}${time}${path.suffix}`)
   return input
 }
@@ -73,11 +74,7 @@ async function getContent (input) {
 
   let output
   if (typeof input === 'object') {
-    if (input?.name) {
-      output = `[${time}] ${input.stack}}`
-    } else {
-      output = `[${time}] ${JSON.stringify(input, null)}`
-    }
+    output = `[${time}] ${util.inspect(input, { depth: null })}`
   } else {
     output = `[${time}] ${input}`
   }

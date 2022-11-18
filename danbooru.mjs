@@ -12,7 +12,7 @@ export async function requestImage (tag = 'fox_girl', rating = 'g') {
   // rating can be 'g,s' but that adds suggestive content which can get me booped by Discord
   // example of extreme "suggestive": https://cdn.donmai.us/original/fb/ec/__kitsune_onee_san_original_drawn_by_akitsuki_karasu__fbecb3a960885c4227d474c0d36b66d6.png
   // https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg score:>5 favcount:>5 rating:g (fox_girl)
-  const url = `https://danbooru.donmai.us/posts/random.json?tags=rating:${rating} (${tag})`
+  const url = `https://danbooru.donmai.us/posts/random.json?tags=filetype:png,jpg,gif rating:${rating} (${tag})`
   // `https://danbooru.donmai.us/posts/random?tags=filetype:png,jpg score:>5 favcount:>5 rating:${rating} (${tag})`
   try {
     log.debug(`Fetching tags: [${tag}] with rating: [${rating}]...`)

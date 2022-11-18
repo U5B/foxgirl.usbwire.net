@@ -71,6 +71,7 @@ export async function cacheData (req, data) {
 /**
  * check if data is cached
  * @param {String} ip - ip address
+ * @returns {Promise<import('./type.mjs').apiCombined|false>}
  */
 export async function dataIsCached (ip) {
   if (cached.ips[ip]?.data) return cached.ips[ip].data // if it exists on that ip, return the data

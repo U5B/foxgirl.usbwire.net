@@ -20,7 +20,7 @@ app.use(async (req, res, next) => {
 })
 
 app.get('/help', async (req, res) => {
-  res.redirect('https://usbwire.net/posts/mimi')
+  res.redirect(process.env.REDIRECT_URL)
 })
 
 app.get(/^\/(\w+)(?:\/(\w+))?(?:\/(\w+))?(?:\/.*)?$/, async (req, res, next) => {
