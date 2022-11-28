@@ -64,7 +64,11 @@ export async function get (req, res, rating = 'g', endpoint = 'fox', options = {
       addGlobalRatelimit()
       const url = options.forceHD ? cachedData.data.urlhd : cachedData.data.url
       const downloadedImage = await downloadImage(url)
-      if (downloadedImage !== false) cachedData.data.image = downloadedImage
+      if (downloadedImage !== false) {
+        cachedData.data.image = downloadedImage.image
+        cachedData.data.mime = downloadedImage.mime
+        cachedData.data.extension = downloadedImage.extension
+      }
     }
     return await sendData(req, res, cachedData.data, options.image, options.forceDownload)
   }
