@@ -3,7 +3,7 @@ import { queueTag } from './queue.mjs'
 
 export const cached = {
   ips: {},
-  lastData: null,
+  lastData: false,
   requests: 0,
   requestsTimeout: null,
   ratelimit: false,
@@ -33,7 +33,6 @@ async function preCache (ip) {
     cached.ips[ip] = {
       data: null,
       previousData: null,
-      url: null,
       timeout: null,
       requests: 0
     }
@@ -55,7 +54,7 @@ async function postCache (ip) {
 
 /**
  * store cached data
- * @param {express.Request} req - request information
+ * @param {import('express').Request} req - request information
  * @param {import('./type.mjs').apiCombined} data - imageData
  */
 export async function cacheData (req, data) {
@@ -63,7 +62,7 @@ export async function cacheData (req, data) {
   await preCache(ip)
   cached.ips[ip].data = data
   cached.ips[ip].previousData = data
-  cached.ips[ip].url = req.url
+  if (data.rating === 'g') cached.lastData = data
   await postCache(ip)
   cached.ips[ip].requests++
 }
@@ -71,12 +70,12 @@ export async function cacheData (req, data) {
 /**
  * check if data is cached
  * @param {String} ip - ip address
- * @returns {Promise<import('./type.mjs').apiCombined|false>}
+ * @returns {Promise<import('./type.mjs').apiCombined>}
  */
 export async function dataIsCached (ip) {
   if (cached.ips[ip]?.data) return cached.ips[ip].data // if it exists on that ip, return the data
   if (cached.ips[ip]?.previousData) return cached.ips[ip].previousData
-  return false
+  return cached.lastData // otherwise use the global cache
 }
 
 /**

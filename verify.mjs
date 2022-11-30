@@ -16,7 +16,6 @@ export async function requestTag (endpoint = 'foxgirl', rating = 'g', image = tr
   const tag = await randomTag(endpoint)
   const request = await requestTagRaw(tag, rating, image, hd)
   request.endpoint = endpoint
-  cached.lastData = request
   return request
 }
 
@@ -55,7 +54,6 @@ export async function requestTagRaw (tag = 'fox_girl', rating = 'g', image = tru
     return await requestTagRaw(tag, rating, image, hd)
   }
   const data = await newRequest(response, downloadedImage, tag, rating)
-  cached.lastData = data
   return data
 }
 

@@ -15,20 +15,20 @@ const webhookClient = new discord.WebhookClient({ url: process.env.WEBHOOK_URL }
  * @param {Boolean} download - tell the browser to download the image
  */
 async function writeImageData (res, data, download = false) {
+  const tagEndpoint = data.endpoint ?? data.tag
   const headers = {
     'content-type': data.mime,
-    // 'content-disposition': `attachment; filename=${data.endpoint}-${data.id}.${data.extension}`,
     'content-length': data.image.length,
     'mimi-image': data.url,
     'mimi-post': `https://danbooru.donmai.us/posts/${data.id}`,
     'mimi-tags': data.tags,
-    'mimi-endpoint': data.endpoint,
+    'mimi-endpoint': tagEndpoint,
     'mimi-rating': data.rating
   }
-  if (download === true) headers['content-disposition'] = `attachment; filename=${data.endpoint}-${data.id}.${data.extension}`
+  if (download === true) headers['content-disposition'] = `attachment; filename=${tagEndpoint}-${data.id}.${data.extension}`
   res.set(headers)
   res.write(data.image)
-  log.log(`Served ${data.tag}.${data.extension}: ${data.url} as https://danbooru.donmai.us/posts/${data.id}`)
+  log.log(`Served "${tagEndpoint}.${data.extension}": ${data.url} as https://danbooru.donmai.us/posts/${data.id}`)
   return true
 }
 
@@ -61,7 +61,7 @@ export async function get (req, res, rating = 'g', endpoint = 'fox', options = {
   const cachedData = await isCached(ip, req)
   if ((cachedData.cache || (cachedData.data && options.forceCache)) === true) {
     if (options.forceRaw === true) {
-      addGlobalRatelimit()
+      await addGlobalRatelimit()
       const url = options.forceHD ? cachedData.data.urlhd : cachedData.data.url
       const downloadedImage = await downloadImage(url)
       if (downloadedImage !== false) {
@@ -76,9 +76,8 @@ export async function get (req, res, rating = 'g', endpoint = 'fox', options = {
   let data
   if (options.forceRaw === false) data = await cachedTag(ip, endpoint, rating)
   else data = await requestTag(endpoint, rating, options.image, options.forceHD)
-  if (data?.image == null && cachedData.cache) {
-    return await sendData(req, res, cachedData.data, options.image, options.forceDownload)
-  } else if (data?.image == null) return res.status(404).end()
+  if (data?.image == null && cachedData.cache) return await sendData(req, res, cachedData.data, options.image, options.forceDownload)
+  else if (data?.image == null) return res.status(404).end()
   else {
     sendWebhook(data)
     return await sendData(req, res, data, options.image, options.forceDownload)
@@ -205,9 +204,12 @@ export async function serveEndpoint (req, res, endpoint, modifier, modifier2) {
  * send an image to a webhook
  * @param {import('./type.mjs').apiCombined} data
  */
-// TODO: add a check for image size (8MB limit)
 async function sendWebhook (data) {
   if (data?.rating !== 'g' || !data?.image) return // horny no more!
+  if (data?.image.length >= 8000000) {
+    log.error(`Image size: ${data.image.length} is bigger than 8MB (8000000 bytes)`)
+    return
+  }
   const webhookContent = {
     username: 'mimi.usbwire.net',
     files: [data.image]
