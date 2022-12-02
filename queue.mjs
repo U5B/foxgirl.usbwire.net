@@ -12,7 +12,6 @@ import { requestTag } from './verify.mjs'
 export async function randomQueueEndpoint (attempts = 0) {
   if (tag.queue.length > 0 || tag.busy === true) return // we may get a request while running this function
   const random = await randomEndpoint()
-  if (cached.g == null) cached.g = {}
   if (cached.g[random] == null) cached.g[random] = []
   const limit = tag.limit.g[random] ?? tag.limit.default
   if (cached.g[random].length <= limit) {
@@ -29,7 +28,6 @@ export async function randomQueueEndpoint (attempts = 0) {
  * @param {import('./type.mjs').rating} rating
  */
 export async function queueTag (endpoint = 'foxgirl', rating = 'g') {
-  if (cached[rating] == null) cached[rating] = {}
   if (cached[rating][endpoint] == null) cached[rating][endpoint] = []
   if (cached[rating][endpoint].length === 0) await addTag(endpoint, rating, true, false)
   tag.queue.push([endpoint, rating])

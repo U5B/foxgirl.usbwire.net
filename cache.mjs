@@ -2,13 +2,20 @@ import { config } from './config.mjs'
 import { queueTag } from './queue.mjs'
 
 export const cached = {
-  ips: {},
-  lastData: false,
+  // (dynamic) configuration
   requests: 0,
   requestsTimeout: null,
   ratelimit: false,
   ratelimitTimeout: null,
-  delay: 0
+  delay: 0,
+  // ip data
+  ips: {},
+  // image data
+  g: {},
+  q: {},
+  s: {},
+  e: {},
+  lastData: false,
 }
 
 /**
