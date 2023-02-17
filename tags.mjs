@@ -9,7 +9,8 @@ const internal = {
   wolfgirl: ['solo wolf_girl'],
   catboy: ['solo cat_boy'],
   catgirl: ['solo cat_girl'],
-  mimi: ['animal_ear_fluff']
+  mimi: ['animal_ear_fluff'],
+  rootofallevil: ["kemomimi-chan_(naga_u) cardboard_box"] // foxgirl in a cardboard_box = the root of all evil
 }
 const alias = {
   kitsune: 'fox',

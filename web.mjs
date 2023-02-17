@@ -15,20 +15,18 @@ const webhookClient = new discord.WebhookClient({ url: process.env.WEBHOOK_URL }
  * @param {Boolean} download - tell the browser to download the image
  */
 async function writeImageData (res, data, download = false) {
-  const tagEndpoint = data.endpoint ?? data.tag
   const headers = {
     'content-type': data.mime,
     'content-length': data.image.length,
     'mimi-image': data.url,
     'mimi-post': `https://danbooru.donmai.us/posts/${data.id}`,
     'mimi-tags': data.tags,
-    'mimi-endpoint': tagEndpoint,
+    'mimi-endpoint': data.endpoint ?? data.tag,
     'mimi-rating': data.rating
   }
-  if (download === true) headers['content-disposition'] = `attachment; filename=${tagEndpoint}-${data.id}.${data.extension}`
+  if (download === true) headers['content-disposition'] = `attachment; filename=${data.endpoint ?? data.tag}-${data.id}.${data.extension}`
   res.set(headers)
   res.write(data.image)
-  log.log(`Served "${tagEndpoint}.${data.extension}": ${data.url} as https://danbooru.donmai.us/posts/${data.id}`)
   return true
 }
 
@@ -39,14 +37,11 @@ async function writeImageData (res, data, download = false) {
 async function isCached (ip) {
   const requestCount = cached.ips[ip]?.requests
   const dataCached = await dataIsCached(ip)
-  if (
-    dataCached && ( // data cached
-      requestCount >= config.requests.per || // too many requests for this ip
-      cached.requests >= config.requests.max || // too many requests globally
-      cached.ratelimit === true // ratelimited by danbooru
-    )
-  ) return { data: dataCached, cache: true }
-  return { data: dataCached, cache: false }
+  if (!dataCached) return { data: dataCached, cache: false, http304: false }
+  if (requestCount >= config.requests.per) return { data: dataCached, cache: true, http304: true }
+  if (requestCount >= config.requests.max) return { data: dataCached, cache: true, http304: false }
+  if (cached.ratelimit === true) return { data: dataCached, cache: true, http304: false }
+  return { data: dataCached, cache: false, http304: false }
 }
 
 /**
@@ -70,17 +65,17 @@ export async function get (req, res, rating = 'g', endpoint = 'fox', options = {
         cachedData.data.extension = downloadedImage.extension
       }
     }
-    return await sendData(req, res, cachedData.data, options.image, options.forceDownload)
+    return await sendData(req, res, cachedData.data, options.image, options.forceDownload, cachedData.http304)
   }
   await addGlobalRatelimit()
   let data
   if (options.forceRaw === false) data = await cachedTag(ip, endpoint, rating)
   else data = await requestTag(endpoint, rating, options.image, options.forceHD)
-  if (data?.image == null && cachedData.cache) return await sendData(req, res, cachedData.data, options.image, options.forceDownload)
+  if (data?.image == null && cachedData.cache) return await sendData(req, res, cachedData.data, options.image, options.forceDownload, false)
   else if (data?.image == null) return res.status(404).end()
   else {
     sendWebhook(data)
-    return await sendData(req, res, data, options.image, options.forceDownload)
+    return await sendData(req, res, data, options.image, options.forceDownload, false)
   }
 }
 /**
@@ -91,11 +86,19 @@ export async function get (req, res, rating = 'g', endpoint = 'fox', options = {
  * @param {Boolean} image - whenever to serve an image or to redirect you
  * @param {Boolean} download - if serving the image, download the image?
  */
-async function sendData (req, res, data, image = true, download = false) {
+async function sendData (req, res, data, image = true, download = false, http304 = false) {
   await cacheData(req, data)
-  if (image === false) return res.redirect(data.url)
-  await writeImageData(res, data, download)
-  return res.status(200).end()
+  if (image === false) {
+    log.log(`Redirected "${data.endpoint ?? data.tag}.${data.extension}": ${data.url} as https://danbooru.donmai.us/posts/${data.id}`)
+    return res.redirect(data.url)
+  } else if (http304 === true) {
+    log.log(`Cached "${data.endpoint ?? data.tag}.${data.extension}": ${data.url} as https://danbooru.donmai.us/posts/${data.id}`)
+    return res.status(304).end()
+  } else {
+    await writeImageData(res, data, download)
+    log.log(`Served "${data.endpoint ?? data.tag}.${data.extension}": ${data.url} as https://danbooru.donmai.us/posts/${data.id}`)
+    return res.status(200).end()
+  }
 }
 /**
  *

@@ -23,14 +23,25 @@ app.get('/help', async (req, res) => {
   res.redirect(process.env.REDIRECT_URL)
 })
 
+app.get(/^\/404(?:\/.*)?$/, async (req, res, next) => {
+  res.status(404).end()
+})
+
+app.get('/', async (req, res, next) => {
+  res.redirect(process.env.REDIRECT_URL)
+})
+// matches "/" followed by endpoint followed by optional modifiers
 app.get(/^\/(\w+)(?:\/(\w+))?(?:\/(\w+))?(?:\/.*)?$/, async (req, res, next) => {
   await determineEndpoint(req, res, next)
 })
 
+
+// matches "/" followed by modifers
+/*
 app.get(/^\/(\w+)?(?:\/(\w+))?(?:\/.*)?$/, async (req, res, next) => {
   await determineModifier(req, res, next, 'random')
 })
-
+*/
 app.use(async (req, res, next) => {
   res.status(404).end()
 })
