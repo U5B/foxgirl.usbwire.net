@@ -10,7 +10,8 @@ const internal = {
   catboy: ['solo cat_boy'],
   catgirl: ['solo cat_girl'],
   mimi: ['animal_ear_fluff'],
-  rootofallevil: ["kemomimi-chan_(naga_u) cardboard_box"] // foxgirl in a cardboard_box = the root of all evil
+  rootofallevil: ['kemomimi-chan_(naga_u) cardboard_box'], // foxgirl in a cardboard_box = the root of all evil
+  transparentasciifoxgirl: ['white_background fox_girl'] // for ascii generator
 }
 const alias = {
   kitsune: 'fox',
@@ -27,12 +28,22 @@ const tag = {
   busy: false,
   limit: {
     g: {
-      foxgirl: 20
+      foxgirl: 5,
+      foxboy: 5,
+      mimi: 1,
+      rootofallevil: 1,
+      transparentasciifoxgirl: 1,
+      default: 2
     },
-    s: {},
-    q: {},
-    e: {},
-    default: 3
+    s: {
+      default: 1
+    },
+    q: {
+      default: 1
+    },
+    e: {
+      default: 1
+    },
   }
 }
 

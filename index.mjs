@@ -6,6 +6,8 @@ import { determineEndpoint, determineModifier } from './web.mjs'
 import { randomQueueEndpoint } from './queue.mjs'
 
 const app = express()
+// disable x-powered-by header
+app.disable('x-powered-by');
 
 // this is required so that the ip forwarded from Caddy is trusted
 app.set('trust proxy', (ip) => {

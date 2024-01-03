@@ -33,13 +33,18 @@ async function writeImageData (res, data, download = false) {
 /**
  * Check if we have cached data or not
  * @param {String} ip - ip address
+ * @param {import('express').Request} req - request
  */
-async function isCached (ip) {
+async function isCached (ip, req) {
   const requestCount = cached.ips[ip]?.requests
   const dataCached = await dataIsCached(ip)
+  // cache doesn't exist
   if (!dataCached) return { data: dataCached, cache: false, http304: false }
+  // 304
   if (requestCount >= config.requests.per) return { data: dataCached, cache: true, http304: true }
+  // non 304
   if (requestCount >= config.requests.max) return { data: dataCached, cache: true, http304: false }
+  // pain and suffering occured
   if (cached.ratelimit === true) return { data: dataCached, cache: true, http304: false }
   return { data: dataCached, cache: false, http304: false }
 }
@@ -165,11 +170,11 @@ export async function serveEndpoint (req, res, endpoint, modifier, modifier2) {
       options.forceDownload = true
       break
     }
-    case 'w': {
-      options.forceHD = true
-      options.forceRaw = true
-      break
-    }
+    // case 'w': {
+    //   options.forceHD = true
+    //   options.forceRaw = true
+    //   break
+    // }
     default: {
       rating = 'g'
       break
@@ -190,11 +195,11 @@ export async function serveEndpoint (req, res, endpoint, modifier, modifier2) {
       options.forceDownload = true
       break
     }
-    case 'w': {
-      options.forceHD = true
-      options.forceRaw = true
-      break
-    }
+    // case 'w': {
+    //   options.forceHD = true
+    //   options.forceRaw = true
+    //   break
+    // }
     default: {
       break
     }

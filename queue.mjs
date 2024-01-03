@@ -13,10 +13,10 @@ export async function randomQueueEndpoint (attempts = 0) {
   if (tag.queue.length > 0 || tag.busy === true) return // we may get a request while running this function
   const random = await randomEndpoint()
   if (cached.g[random] == null) cached.g[random] = []
-  const limit = tag.limit.g[random] ?? tag.limit.default
+  const limit = tag.limit.g[random] ?? tag.limit.g.default
   if (cached.g[random].length <= limit) {
     await queueTag(random, 'g')
-  } else if (attempts <= tag.limit.default) {
+  } else if (attempts <= tag.limit.g.default) {
     attempts++
     await randomQueueEndpoint(attempts)
   }
@@ -50,10 +50,10 @@ async function requeueTag () {
   await addTag(endpoint, rating, true, false)
   if (cached.delay > 0) {
     await util.sleep(cached.delay)
-    cached.delay = Math.max(0, cached.delay - 250)
+    cached.delay = Math.max(1000, cached.delay - 250)
   } else if (cached.delay < 0) cached.delay = 0
   tag.busy = false
-  const limit = tag.limit[rating][endpoint] ?? tag.limit.default
+  const limit = tag.limit[rating][endpoint] ?? tag.limit[rating].default
   if (tag.queue.length > 0) return await requeueTag()
   else if (cached[rating][endpoint].length <= limit) return await queueTag(endpoint, rating)
   else await randomQueueEndpoint()

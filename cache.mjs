@@ -7,7 +7,7 @@ export const cached = {
   requestsTimeout: null,
   ratelimit: false,
   ratelimitTimeout: null,
-  delay: 0,
+  delay: 1000,
   // ip data
   ips: {},
   // image data
